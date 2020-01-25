@@ -12,10 +12,6 @@ RUN python3.8 get-pip.py
 
 ADD requirements.txt .
 
-ARG PYTHON_VERSION=cp38
-ARG CUDA_VERSION=cuda92
-ARG PLATFORM=linux_x86_64
-ARG BASE_URL='https://storage.googleapis.com/jax-releases'
 RUN pip install --upgrade https://storage.googleapis.com/jax-releases/cuda92/jaxlib-0.1.37-cp38-none-linux_x86_64.whl
 RUN pip install --upgrade jax
 
