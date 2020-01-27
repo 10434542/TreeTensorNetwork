@@ -1,0 +1,2 @@
+#!/bin/sh
+sudo docker run --gpus all -v $(pwd):/usr/src/app -it jax-cuda python3.8 $1
