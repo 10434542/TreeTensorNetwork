@@ -1,2 +1,2 @@
 #!/bin/sh
-sudo docker run --gpus all -v $(pwd):/usr/src/app -e "LD_LIBRARY_PATH=/usr/local/cuda/lib64" -e "XLA_FLAGS=--xla_gpu_cuda_data_dir=/usr/local/cuda/lib64" -it jax-cuda python3.8 $1
+sudo docker run --gpus all -v $(pwd):/usr/src/app -e "LD_LIBRARY_PATH=/usr/local/cuda/lib64" -e "XLA_FLAGS=--xla_gpu_cuda_data_dir=/usr/local/cuda" -it jax-cuda python3.8 $1
