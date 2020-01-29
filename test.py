@@ -1,3 +1,4 @@
+import torch
 import jax.numpy as np
 from jax import grad, jit, vmap
 from jax import random
