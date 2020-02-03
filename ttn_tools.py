@@ -2,9 +2,9 @@ import numpy as np
 import torch
 import opt_einsum
 import cupy as cp
-###############################################################################
+################################################################################
 # TOOLS FOR TTN file                                                           #
-###############################################################################
+################################################################################
 torch.set_printoptions(10)
 
 def create_sym_tensor(*dims, backend='torch'):
@@ -41,3 +41,6 @@ def create_sym_tensor(*dims, backend='torch'):
         tens=None
 
     return tens
+
+def get_bonds():
+    """ docstring for get_bonds """

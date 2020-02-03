@@ -1,5 +1,6 @@
 import ttn_tools as tt
 import numpy as np
+
 class Node:
     """Base Node class for TreeTensorNetwork.
        ------------------------------------------------------------------------
