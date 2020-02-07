@@ -15,12 +15,18 @@ class Node:
         self.lattice = lattice
         self.layer = layer
         self.current_tensor = None
-        self.bondlist = None
-        self.bclist = None
-        self.tensornet = []
+        self.cache_tensor = None
+        self.vertical_two_site_terms = None
+        self.horizontal_two_site_terms = None
+        self.one_site_terms = None
+        self.vertical_bc_terms = None
+        self.horizontal_bc_terms = None
+        self.t_shape = None
+        self.horizontal_networks = []
+        self.vertical_networks = []
+        self.one_site_networks = []
         self.bralegs = [None]*3
         self.ketlegs =[None]*3
-        self.tensor_dicts = []
 
     def __str__(self):
         return (str(self.layer))
@@ -55,14 +61,14 @@ class TreeTensorNetwork:
 
     """
 
-    def __init__(self, root, cut = None, chilist = None, hamiltonian = None,
+    def __init__(self, system_size, cut = None, chilist = None, hamiltonian = None,
         dimension = None, bc_type = 'closed', tree_seed = None,
         forbidden_bonds = [], optimize_type = 'greedy', backend='torch'):
 
+        self.root = Node(value='0', layer=0, lattice=np.arange(1,system_size+1))
         self.chilist=chilist
         self.backend = backend
         self.optimize_type = optimize_type
-        self.root = root
         self.dimension = dimension
         self.hamiltonian = hamiltonian
         self.cut = cut
@@ -72,6 +78,7 @@ class TreeTensorNetwork:
         self.energy_per_sweep_list = []
         self.current_expectation_values = None
         self.current_iteration = 0
+        # # TODO: add hamiltonian functionality
         self.spacings = np.unique([i[1] for i in self.hamiltonian])
         self.bc_type = str.lower(bc_type)
         self.square_size = np.sqrt(self.root.lattice.size).astype(int)
@@ -84,12 +91,18 @@ class TreeTensorNetwork:
         # self.forbidden_bonds = self.get_boundary_bonds(self.bc_type)
         # self.set_attributes()
         self.insert_nodes(self.root)
-        self.get_bonds(self.root.left)
+        self.set_bonds()
+        for i in self.node_list:
+            self.insert_tensor_v2(i)
+        self.prepare_networks()
+        self.add_legs()
+        self.get_orders()
 
 
     def store_time(self, t):
         """ method that merely serves to store time using decorator timer()"""
         self.times.append(t)
+
 
     def insert_nodes(self, node):
         """ docstring for insert_nodes """
@@ -124,41 +137,133 @@ class TreeTensorNetwork:
                   layer = node.layer+1, lattice = temp_lattice)
             self.insert_nodes(node.right)
 
+    def insert_tensor_v2(self, node):
+        if node is self.root:
+            node.current_tensor = tt.create_sym_tensor(1,
+                self.chilist[node.layer], self.chilist[node.layer], backend=self.backend)
+            node.cache_tensor = tt.create_cache_tensor(1,
+                self.chilist[node.layer], self.chilist[node.layer], backend=self.backend)
+
+        elif (node.layer == self.cut) and (node.isLeftChild):
+            if node.lattice.flatten().size%2 == 0:
+                node.current_tensor = tt.create_sym_tensor(self.chilist[-1],
+                    int(2**(len(node.lattice.flatten())/2)), int(2**(len(node.lattice.flatten())/2)),
+                    backend=self.backend).reshape(self.chilist[-1],
+                        *np.ones(len(node.lattice.flatten()), dtype = 'int')*2)
+                node.cache_tensor= tt.create_cache_tensor(self.chilist[-1],
+                    int(2**(len(node.lattice.flatten())/2)), int(2**(len(node.lattice.flatten())/2)),
+                    backend=self.backend).reshape(self.chilist[-1],
+                        *np.ones(len(node.lattice.flatten()), dtype = 'int')*2)
+            else:
+                # print('not mod 2')
+                node.current_tensor = (tt.create_tensor(self.chilist[-1],
+                                    int(2**(node.lattice.size)), backend=self.backend).
+                                    reshape(self.chilist[-1],*np.ones(node.lattice
+                                    .size, dtype = 'int')*2))
+                node.cache_tensor = (tt.create_cache_tensor(self.chilist[-1],
+                                    int(2**(node.lattice.size)), backend=self.backend).
+                                    reshape(self.chilist[-1],*np.ones(node.lattice
+                                    .size, dtype = 'int')*2))
+
+        elif (node.layer != self.cut) and (node.isLeftChild) and (node is not self.root):
+            node.current_tensor = tt.create_sym_tensor(self.chilist[node.parent.layer],
+                self.chilist[node.layer], self.chilist[node.layer], backend=self.backend)
+            node.cache_tensor = tt.create_cache_tensor(self.chilist[node.parent.layer],
+                self.chilist[node.layer], self.chilist[node.layer], backend=self.backend)
+
+        # all nodes within a layer have the same tensor!
+        for another_node in self.node_list:
+            if (another_node.layer == node.layer) and (another_node.value != node.value):
+                another_node.current_tensor = node.current_tensor
+                another_node.cache_tensor = node.cache_tensor
+
     def insert_tensor(self, node):
         """ Inserts tensors in the node attribute 'current_tensor' given bond dimension list
             named 'chilist.'"""
 
         if node is self.root:
             node.current_tensor = tt.create_sym_tensor(1,
-                self.chilist[node.layer], self.chilist[node.layer], self.backend)
+                self.chilist[node.layer], self.chilist[node.layer], backend=self.backend)
+            node.cache_tensor = tt.create_cache_tensor(1,
+                self.chilist[node.layer], self.chilist[node.layer], backend=self.backend)
 
         elif node.layer == self.cut:
-            if node.lattice.size%2 == 0:
+            if node.lattice.flatten().size%2 == 0:
                 node.current_tensor = tt.create_sym_tensor(self.chilist[-1],
-                    int(2**(len(node.lattice)/2)), int(2**(len(node.lattice)/2))).reshape(self.chilist[-1],
-                        *np.ones(len(node.lattice), dtype = 'int')*2, self.backend)
+                    int(2**(len(node.lattice.flatten())/2)), int(2**(len(node.lattice.flatten())/2)),
+                    backend=self.backend).reshape(self.chilist[-1],
+                        *np.ones(len(node.lattice.flatten()), dtype = 'int')*2)
+                node.cache_tensor= tt.create_cache_tensor(self.chilist[-1],
+                    int(2**(len(node.lattice.flatten())/2)), int(2**(len(node.lattice.flatten())/2)),
+                    backend=self.backend).reshape(self.chilist[-1],
+                        *np.ones(len(node.lattice.flatten()), dtype = 'int')*2)
+
+            # TODO: make a function create_tensor and rewrite code below
             else:
                 # print('not mod 2')
                 node.current_tensor = (tt.create_tensor(self.chilist[-1],
                                     int(2**(node.lattice.size))).
                                     reshape(self.chilist[-1],*np.ones(node.lattice
                                     .size, dtype = 'int')*2))
+                node.cache_tensor = (tt.create_cache_tensor(self.chilist[-1],
+                                    int(2**(node.lattice.size))).
+                                    reshape(self.chilist[-1],*np.ones(node.lattice
+                                    .size, dtype = 'int')*2))
         else:
             node.current_tensor = tt.create_sym_tensor(self.chilist[node.parent.layer],
-                self.chilist[node.layer], self.chilist[node.layer], self.backend)
+                self.chilist[node.layer], self.chilist[node.layer], backend=self.backend)
+            node.cache_tensor = tt.create_cache_tensor(self.chilist[node.parent.layer],
+                self.chilist[node.layer], self.chilist[node.layer], backend=self.backend)
 
-    def get_bonds(self, node):
-        """ finds the bonds of the current node according to a given hamiltonian
-            and dimension """
-        print(node.lattice, node.lattice.shape,'\n',
-            self.root.lattice.shape, self.root.lattice)
-        for i in node.lattice.flatten():
-            locations = np.where(self.root.lattice==i)
-            print(locations, type(locations))
-            # m, n = locations[0][0], locations[0][1]
-            # vertical_bond = [self.root.lattice[m,n], self.root.lattice[(m+1)%self.square_size,n]]
-            # print(vertical_bond)
-        # print(np.where(node.lattice))
+    def set_bonds(self):
+        """ Method to be placed in init of class """
+        for i in self.node_list:
+            temp_bonds = tt.get_bonds(self.root.lattice, i.lattice, self.spacings)
+            (i.horizontal_two_site_terms, i.vertical_two_site_terms, i.one_site_terms,
+            i.vertical_bc_terms, i.horizontal_bc_terms) = temp_bonds
 
-        for operator in self.hamiltonian:
-            pass
+
+    def get_orders(self):
+        for node in self.node_list:
+            for network in node.vertical_networks:
+                tt.get_optimal_order(node, network, self.optimize_type)
+            for network in node.horizontal_networks:
+                tt.get_optimal_order(node, network, self.optimize_type)
+            for network in node.one_site_networks:
+                tt.get_optimal_order(node, network, self.optimize_type)
+
+
+    def tensors_to(self, chip_type):
+
+        if self.backend == 'torch':
+            for node in self.node_list:
+                print('loading Node %s onto %s'%(node.value, chip_type))
+                node.current_tensor = node.current_tensor.to(device=chip_type)
+                # node.cache_tensor.to("cuda")
+                print('Node %s its tensor loaded onto %s'%(node.value, chip_type))
+        else:
+            print("try using torch as 'backend'")
+            return
+
+
+    def add_legs(self):
+        """ Docstring for add_legs """
+        for node in self.node_list:
+            tt.get_legs(self.cut, node, node.vertical_networks)
+            tt.get_legs(self.cut, node, node.horizontal_networks)
+            tt.get_legs(self.cut, node, node.one_site_networks)
+
+    def prepare_networks(self):
+        """ Docstring for prepare_networks """
+        # can't zip since lengths of lists can differ in size
+        for node in self.node_list:
+            for a_bond in node.vertical_two_site_terms:
+                node.vertical_networks.append(tt.get_single_network(self.node_list, a_bond))
+            for a_bond in node.horizontal_two_site_terms:
+                node.horizontal_networks.append(tt.get_single_network(self.node_list, a_bond))
+            for a_bond in node.vertical_bc_terms:
+                node.vertical_networks.append(tt.get_single_network(self.node_list, a_bond))
+            for a_bond in node.horizontal_bc_terms:
+                node.horizontal_networks.append(tt.get_single_network(self.node_list, a_bond))
+            for a_bond in node.one_site_terms:
+                node.one_site_networks.append(tt.get_single_network(self.node_list, a_bond))
