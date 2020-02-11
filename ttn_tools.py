@@ -2,7 +2,9 @@ import numpy as np
 import torch
 import time
 import opt_einsum as oe
-import cupy as cp
+import scipy.sparse as spl
+import scipy.sparse.linalg as sl
+# import cupy as cp
 ################################################################################
 # TOOLS FOR TTN file                                                           #
 ################################################################################
@@ -15,7 +17,7 @@ def create_cache_tensor(*dims, backend='torch'):
             print("type is not int m8")
             raise TypeError
     if backend == 'torch':
-        tens = torch.zeros(*dims, dtype = torch.double, device='cuda:0')
+        tens = torch.zeros(*dims, dtype = torch.float32, device='cuda:0')
     elif backend == 'numpy':
         tens = np.zeros(dims)
     return tens
@@ -27,7 +29,7 @@ def create_tensor(*dims, backend = 'torch'):
             print("type is not int m8")
             raise TypeError
     if backend == 'torch':
-        tens = torch.rand(*dims, dtype=torch.double, device='cuda:0')
+        tens = torch.rand(*dims, dtype=torch.float32, device='cuda:0')
         tens = tens.T.svd(some=True)[0]
         tens = tens.T.reshape(*dims)
     elif backend == 'numpy':
@@ -52,8 +54,8 @@ def create_sym_tensor(*dims, backend='torch'):
 
     elif backend=='torch':
         # tens = torch.rand(*dims,dtype = torch.double, device='cuda:0')
-        tens = torch.cuda.DoubleTensor(*dims).random_(0, 1)
-        tens = tens+tens.transpose(2,1)
+        tens = torch.cuda.FloatTensor(*dims).random_(0, 1)
+        tens.add_(tens.transpose(2,1))
         # transpose is need, for explanation see:
         # https://github.com/pytorch/pytorch/issues/24900
         tens = tens.reshape(dims[0],dims[1]*dims[1]).T
@@ -75,6 +77,7 @@ def create_sym_tensor(*dims, backend='torch'):
 def get_absolute_distance(lattice, spacing, constraints):
     """ docstring for get_absolute_distance() """
     pass
+
 def get_bonds(lattice, sub_lattice, spacings):
     """ docstring for get_bonds """
     for space in spacings:
@@ -133,6 +136,7 @@ def get_legs(cut, node, network):
         operator_legs = []
         all_legs = []
         current_value = node.value
+        tensors_to_loop_over.sort(key = lambda x: x.layer)
 
         for current_node in tensors_to_loop_over:
             if current_node.isRoot():
@@ -189,8 +193,8 @@ def get_legs(cut, node, network):
                     current_node.ketlegs = np.concatenate(([current_node.ketlegs[0]], current_node.bralegs[1:]))
 
                     for j in bond:
-                        mask_site = np.where(current_node.lattice == j)[0]+1
-
+                        mask_site = np.where(current_node.lattice.flatten() == j)[0]+1
+                        # print(mask_site)
                         if mask_site.size>0:
                             current_node.ketlegs[mask_site] = max_leg+1
                             operator_legs.append(np.array([current_node.bralegs[mask_site][0], max_leg+1]))
@@ -204,6 +208,8 @@ def get_legs(cut, node, network):
             if current_node.value == current_value:
                 environment_legs = current_node.bralegs
             all_legs.extend((current_node.bralegs,current_node.ketlegs))
+            # if node.isRoot():
+            #     print(operator_legs, bond)
 
         # if reverse_bool:
         #     operator_legs = operator_legs[::-1]
@@ -313,62 +319,215 @@ def get_optimal_order(node, dict_of_networks, optimize_type):
     dict_of_networks['einsum_energy_indices'] = copied_energy_legs
     dict_of_networks['einsum_path_energy'] = new_opt_path_energy[0]
 
-def contract_network(operators, network):
+# add environment or energy kwarg
+def contract_network(operators, network, contract_type='env'):
     temp_operators = [i for i in operators[0]]
     path = []
-    # begin = time.time()
-    for m,n in zip(network['environment'], network['einsum_indices']):
-        path.append(m.current_tensor)
-        path.append(n)
-    for m,n in zip(temp_operators, network['einsum_indices'][-len(temp_operators):]):
-        path.append(m)
-        path.append(n)
-    # end = time.time()
-    # print('loop time per bond: ', end-begin)
-    temp_tens = operators[-1][0]*oe.contract(*path, network['out_list'],
-                    optimize=network['einsum_path'])
+    if contract_type == 'env':
+        for m,n in zip(network['environment'], network['einsum_indices']):
+            path.append(m.current_tensor)
+            path.append(n)
+        for m,n in zip(temp_operators, network['einsum_indices'][-len(temp_operators):]):
+            path.append(m)
+            path.append(n)
 
-    # print(temp_tens.shape)
-    return temp_tens
+        return oe.contract(*path, network['out_list'],
+                    optimize=network['einsum_path'])
+    elif contract_type == 'energy':
+        for m,n in zip(network['entire_network'], network['einsum_energy_indices']):
+            path.append(m.current_tensor)
+            path.append(n)
+
+        for m,n in zip(temp_operators, network['einsum_energy_indices'][-len(temp_operators):]):
+            path.append(m)
+            path.append(n)
+            # to_contract = [*[m.cur_tensor, n] in zip(network['entire_network'], network['full_legs'])]
+        return oe.contract(*path, optimize=network['einsum_path_energy'])
+
+
+def get_energy(tree_object, node):
+    """ Docstring for get_energy() """
+    if tree_object.backend == 'torch':
+        temp = torch.cuda.FloatTensor([0])
+    elif tree_object.backend == 'numpy':
+        temp = 0
+
+    for operators in tree_object.hamiltonian:
+
+        if operators[1] > 0:
+            for network in node.vertical_networks:
+                # print('ver ',contract_network(operators, network,
+                # contract_type='energy').size())
+                temp += contract_network(operators, network,
+                        contract_type='energy')*operators[-1][0]
+
+            for network in node.horizontal_networks:
+                # print('hor ',contract_network(operators, network,
+                # contract_type='energy').size())
+                temp += contract_network(operators, network,
+                        contract_type='energy')*operators[-1][1]
+        else:
+            for network in node.one_site_networks:
+                # print('one', contract_network(operators, network,
+                # contract_type='energy').size())
+                temp += contract_network(operators, network,
+                        contract_type='energy')*operators[-1][0]
+
+    # tree_object.energy_per_sweep_list.append(temp)
+    # print(temp.size(), type(temp))
+    return temp
 
 def optimize_tensor(tree_object, node):
     """ VOID: optimize method for a single tensor in the Tree Tensor Network using optimal einsum"""
-    print(node.cache_tensor)
-    ti1 = time.time()
-    for operators in tree_object.hamiltonian:
-        print(operators[1])
-        if operators[1] > 0:
-            for network in node.vertical_networks:
-                node.cache_tensor.add_(contract_network(operators, network))
 
-            for network in node.horizontal_networks:
-                node.cache_tensor.add_(contract_network(operators, network))
-
-        else:
-            for network in node.one_site_networks:
-                node.cache_tensor.add_(contract_network(operators, network))
-    tf1 = time.time()
     if tree_object.backend == 'torch':
-        torch.cuda.synchronize()
-        print("contract time took %s sec"%(tf1 - ti1))
-        print(node.cache_tensor)
-        ti = time.time()
-        new_shapes = node.cache_tensor.shape
-        ut, s, v = node.cache_tensor.reshape(new_shapes[0], np.prod(new_shapes[1:])).T.svd(some=True)
-        torch.cuda.synchronize()
-        tf = time.time()
-        node.current_tensor = -1.*torch.matmul(ut,v).reshape(new_shapes)
         node.cache_tensor.zero_()
-        print("svd time torch took %s sec"%(tf-ti))
+        for operators in tree_object.hamiltonian:
+
+            if operators[1] > 0:
+                for network in node.vertical_networks:
+                    node.cache_tensor.add_(contract_network(operators, network)*operators[-1][0])
+
+                for network in node.horizontal_networks:
+                    node.cache_tensor.add_(contract_network(operators, network)*operators[-1][1])
+            else:
+                for network in node.one_site_networks:
+                    node.cache_tensor.add_(contract_network(operators, network)*operators[-1][0])
+
+        new_shapes = node.cache_tensor.shape
+        # need to transpose since torch saves n x n matrix of u, n being the first axes
+        ut, s, v = node.cache_tensor.reshape(new_shapes[0], np.prod(new_shapes[1:])).T.svd(some=True)
+        # torch returns u transposed hence ut.T
+        node.current_tensor = -1.*torch.matmul(v,ut.T).reshape(new_shapes)
 
     elif tree_object.backend == 'numpy':
-        tf1 = time.time()
-        print("contract time took %s sec"%(tf - ti))
-        ti = time.time()
+
+        node.cache_tensor.fill(0)
+        for operators in tree_object.hamiltonian:
+
+            if operators[1] > 0:
+                for network in node.vertical_networks:
+                    node.cache_tensor+=contract_network(operators, network)*operators[-1][0]
+
+                for network in node.horizontal_networks:
+                    node.cache_tensor+=contract_network(operators, network)*operators[-1][1]
+            else:
+                for network in node.one_site_networks:
+                    node.cache_tensor+=contract_network(operators, network)*operators[-1][0]
+
         new_shapes = node.cache_tensor.shape
         u, s, v = np.linalg.svd(node.cache_tensor.reshape(new_shapes[0],
             np.prod(new_shapes[1:])).T, full_matrices = False)
-        tf = time.time()
-        print("svd time numpy took %s sec"%(tf-ti))
-        node.current_tensor =-1.*np.dot(u,v).reshape(new_shapes)
-        node.cache_tensor.fill(0)
+
+        node.current_tensor =-1.*np.dot(v.T, u.T).reshape(new_shapes)
+
+    for a_node in tree_object.node_list:
+        if a_node.value == node.value:
+            a_node.current_tensor = node.current_tensor
+
+def exact_energy(N, hamiltonian, dimension):
+    h = 0.0000
+    if dimension == '2D' or dimension == '2d' or dimension == 2:
+        print('computing 2D hamiltonian')
+        L = int(N**0.5)
+        for i in hamiltonian:
+            if len(i[0]) == 1: # if length of operator list is 1
+                operator = spl.csr_matrix(i[0][0])
+                for k in range(N):
+                    h += spl.kron(spl.kron(spl.identity(2**k), operator, 'csr'),
+                        spl.identity(2**(N-k-1)), 'csr')*i[-1][0]
+            if len(i[0]) == 2: # if length of operator list is 2
+                if type(i[1]) == int:
+                    operators = [spl.csr_matrix(j) for j in i[0]]
+
+                    spacing_identity = spl.identity(2**(i[1]-1))
+                    operators_2_site = spl.kron(spl.kron(operators[0], spacing_identity, 'csr'),
+                        operators[1], 'csr')
+                    # J+J- on i,i+1 and J-J+ on i-1,i
+                    operators_2_site_reversed = spl.kron(spl.kron(operators[1], spacing_identity, 'csr'),
+                        operators[0], 'csr')
+                    # horizontal terms
+                    for k in range(N):
+                        if k%L:
+                            h += spl.kron(spl.kron(spl.identity(2**(k-1)),operators_2_site, 'csr'),
+                                spl.identity(2**(N-k-i[1])), 'csr')*i[2][0]
+                    # vertical terms
+                    for k in range(N-L):
+                        h += spl.kron(spl.kron(spl.kron(spl.kron(spl.identity(2**k),operators[0], 'csr'),
+                            spl.identity(2**(L-1)), 'csr'), operators[1], 'csr'), spl.identity(2**(N-L-k-1)),'csr')*i[2][1]
+
+
+                    # boundary terms
+                    for k in range(L):
+                        h += i[2][1]*spl.kron(spl.kron(spl.kron(spl.kron(spl.identity(2**k),
+                            operators[0], 'csr'),spl.identity(2**(N-L-1)), 'csr'),
+                            operators[1], 'csr'), spl.identity(2**(L-k-1)), 'csr')
+
+                        h += i[2][0]*(spl.kron(spl.kron(spl.kron(spl.kron(spl.identity(2**(k*L)),
+                            operators[0], 'csr'), spl.identity(2**(L-2)), 'csr'), operators[1], 'csr'),
+                            spl.identity(2**(L*(L-k-1))), 'csr'))
+
+                if type(i[1]) == float:
+                    if i[1] == 1.5:
+                        # upwards -> *i[2][1], downwards *i[2][0]
+                        operators = [spl.csr_matrix(j) for j in i[0]]
+                        for k in range(N-L):
+                            if k%L:
+                                # downward to the right
+                                left_id, mid_id, right_id = k-1, L, N-L-(k-1)-2
+                                # print(left_id, mid_id, right_id, left_id+mid_id+right_id)
+                                h+=spl.kron(spl.kron(spl.kron(spl.kron(spl.identity(2**left_id), operators[0], 'csr'), spl.identity(2**mid_id), 'csr'),
+                                    operators[1], 'csr'), spl.identity(2**right_id),'csr')*i[2][0]
+
+                                # upward to the right
+                                left_id_up, mid_id_up, right_id_up = k, L-2, N-(L-2)-k-2
+                                # print(left_id_up, 1, mid_id_up, 1, right_id_up)
+                                h+=spl.kron(spl.kron(spl.kron(spl.kron(spl.identity(2**left_id_up), operators[1], 'csr'), spl.identity(2**mid_id_up), 'csr'),
+                                    operators[0], 'csr'), spl.identity(2**right_id_up),'csr')*i[2][1]
+                        # boundaries right up, followed by right down:
+                        for k in range(L-1):
+                            # up
+                            left_id, mid_id = L*k, 2*L-2
+                            right_id = N - left_id - mid_id-2
+                            # print(left_id, mid_id, right_id, left_id+mid_id+right_id)
+                            h+=spl.kron(spl.kron(spl.kron(spl.kron(spl.identity(2**left_id), operators[1], 'csr'), spl.identity(2**mid_id), 'csr'),
+                                operators[0], 'csr'), spl.identity(2**right_id),'csr')*i[2][1]
+
+                            # down
+                            left_id_down, mid_id_down = L*(k+1)-1, 0
+                            right_id_down = N-left_id_down-mid_id_down - 2
+                            # print(left_id_down, mid_id_down, right_id_down)
+                            h+=spl.kron(spl.kron(spl.kron(spl.kron(spl.identity(2**left_id_down), operators[0], 'csr'), spl.identity(2**mid_id_down), 'csr'),
+                                operators[1], 'csr'), spl.identity(2**right_id_down),'csr')*i[2][0]
+
+                        # boundaries, followed by up right:
+                        # for up left the first boundary is omitted and calculated under
+                        # boundary top right upwards (to bottem):
+
+                        for k in range(L-1):
+                            # boundary top right upwards (to bottem):
+                            left_id = k
+                            mid_id = L*(L-1)
+                            right_id = N - 2 - mid_id - left_id
+                            # print(left_id, mid_id, right_id)
+                            h+=spl.kron(spl.kron(spl.kron(spl.kron(spl.identity(2**left_id), operators[0], 'csr'), spl.identity(2**mid_id), 'csr'),
+                                operators[1], 'csr'), spl.identity(2**right_id),'csr')*i[2][1]
+
+                            left_id2 = k+1
+                            mid_id2 = L*(L-1) - 2
+                            right_id2 = N - 2 -left_id2 - mid_id2
+                            # print(left_id2, mid_id2, right_id2)
+                            # boundary bottem right downwards to top
+                            # order of operators is correct (trust me)
+                            h+=spl.kron(spl.kron(spl.kron(spl.kron(spl.identity(2**left_id2), operators[1], 'csr'), spl.identity(2**mid_id2), 'csr'),
+                                operators[0], 'csr'), spl.identity(2**right_id2),'csr')*i[2][0]
+
+                        # boundary top right [op1] to bottem left [op2] so upwards to the right:
+                        h += spl.kron(spl.kron(spl.kron(spl.kron(spl.identity(2**(L-1)), operators[0], 'csr'), spl.identity(2**((L-2)*L)), 'csr'),
+                            operators[1], 'csr'), spl.identity(2**(L-1)),'csr')*i[2][1]
+                        # boundary bottem right [op1] to top left [op2] so downwards to the right:
+                        h += spl.kron(spl.kron(spl.kron(spl.kron(spl.identity(2**(0)), operators[1], 'csr'), spl.identity(2**(N-2)), 'csr'),
+                            operators[0], 'csr'), spl.identity(2**(0)),'csr')*i[2][0]
+
+
+        return h

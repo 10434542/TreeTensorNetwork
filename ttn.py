@@ -78,7 +78,6 @@ class TreeTensorNetwork:
         self.energy_per_sweep_list = []
         self.current_expectation_values = None
         self.current_iteration = 0
-        # # TODO: add hamiltonian functionality
         self.spacings = np.unique([i[1] for i in self.hamiltonian])
         self.bc_type = str.lower(bc_type)
         self.square_size = np.sqrt(self.root.lattice.size).astype(int)
