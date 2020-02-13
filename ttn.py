@@ -1,5 +1,7 @@
 import ttn_tools as tt
 import numpy as np
+import torch
+# import torch_hamiltonians as ham
 
 class Node:
     """Base Node class for TreeTensorNetwork.
@@ -63,14 +65,20 @@ class TreeTensorNetwork:
 
     def __init__(self, system_size, cut = None, chilist = None, hamiltonian = None,
         dimension = None, bc_type = 'closed', tree_seed = None,
-        forbidden_bonds = [], optimize_type = 'greedy', backend='torch'):
+        forbidden_bonds = [], optimize_type = 'greedy', backend = 'torch', ttype = torch.float32):
 
-        self.root = Node(value='0', layer=0, lattice=np.arange(1,system_size+1))
+        self.system_size = system_size
+        self.root = Node(value='0', layer=0, lattice=np.arange(1,self.system_size+1))
+
         self.chilist=chilist
-        self.backend = backend
+        # self.backend = backend
+        # self.ttype = ttype
         self.optimize_type = optimize_type
+
         self.dimension = dimension
         self.hamiltonian = hamiltonian
+        self.backend = backend
+        self.ttype = ttype
         self.cut = cut
         self.tree_seed = tree_seed
         self.node_list = []
@@ -78,6 +86,7 @@ class TreeTensorNetwork:
         self.energy_per_sweep_list = []
         self.current_expectation_values = None
         self.current_iteration = 0
+
         self.spacings = np.unique([i[1] for i in self.hamiltonian])
         self.bc_type = str.lower(bc_type)
         self.square_size = np.sqrt(self.root.lattice.size).astype(int)
@@ -96,8 +105,13 @@ class TreeTensorNetwork:
         self.prepare_networks()
         self.add_legs()
         self.get_orders()
-
-
+        self.chi_string = 'chi'+'-'.join([str(i) for i in self.chilist])
+        self.file_name = 'N'+str(self.system_size)+'_'+self.chi_string+'_seed'+str(self.tree_seed)
+        self.temp_str = ''
+        for i in self.hamiltonian:
+            for j in i[-1]:
+                self.temp_str+=str(j)
+        self.file_name += '_order' + self.temp_str
     def store_time(self, t):
         """ method that merely serves to store time using decorator timer()"""
         self.times.append(t)
@@ -139,36 +153,42 @@ class TreeTensorNetwork:
     def insert_tensor_v2(self, node):
         if node is self.root:
             node.current_tensor = tt.create_sym_tensor(1,
-                self.chilist[node.layer], self.chilist[node.layer], backend=self.backend)
+                self.chilist[node.layer], self.chilist[node.layer], ttype=self.ttype,
+                backend=self.backend)
             node.cache_tensor = tt.create_cache_tensor(1,
-                self.chilist[node.layer], self.chilist[node.layer], backend=self.backend)
+                self.chilist[node.layer], self.chilist[node.layer], ttype=self.ttype,
+                backend=self.backend)
 
         elif (node.layer == self.cut) and (node.isLeftChild):
             if node.lattice.flatten().size%2 == 0:
                 node.current_tensor = tt.create_sym_tensor(self.chilist[-1],
                     int(2**(len(node.lattice.flatten())/2)), int(2**(len(node.lattice.flatten())/2)),
-                    backend=self.backend).reshape(self.chilist[-1],
+                    ttype=self.ttype, backend=self.backend).reshape(self.chilist[-1],
                         *np.ones(len(node.lattice.flatten()), dtype = 'int')*2)
                 node.cache_tensor= tt.create_cache_tensor(self.chilist[-1],
                     int(2**(len(node.lattice.flatten())/2)), int(2**(len(node.lattice.flatten())/2)),
-                    backend=self.backend).reshape(self.chilist[-1],
+                    ttype=self.ttype, backend=self.backend).reshape(self.chilist[-1],
                         *np.ones(len(node.lattice.flatten()), dtype = 'int')*2)
             else:
                 # print('not mod 2')
                 node.current_tensor = (tt.create_tensor(self.chilist[-1],
-                                    int(2**(node.lattice.size)), backend=self.backend).
+                                    int(2**(node.lattice.size)), ttype=self.ttype,
+                                    backend=self.backend).
                                     reshape(self.chilist[-1],*np.ones(node.lattice
                                     .size, dtype = 'int')*2))
                 node.cache_tensor = (tt.create_cache_tensor(self.chilist[-1],
-                                    int(2**(node.lattice.size)), backend=self.backend).
+                                    int(2**(node.lattice.size)), ttype=self.ttype,
+                                    backend=self.backend).
                                     reshape(self.chilist[-1],*np.ones(node.lattice
                                     .size, dtype = 'int')*2))
 
         elif (node.layer != self.cut) and (node.isLeftChild) and (node is not self.root):
             node.current_tensor = tt.create_sym_tensor(self.chilist[node.parent.layer],
-                self.chilist[node.layer], self.chilist[node.layer], backend=self.backend)
+                self.chilist[node.layer], self.chilist[node.layer], ttype=self.ttype,
+                backend=self.backend)
             node.cache_tensor = tt.create_cache_tensor(self.chilist[node.parent.layer],
-                self.chilist[node.layer], self.chilist[node.layer], backend=self.backend)
+                self.chilist[node.layer], self.chilist[node.layer], ttype=self.ttype,
+                backend=self.backend)
 
         # all nodes within a layer have the same tensor!
         for another_node in self.node_list:

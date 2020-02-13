@@ -4,32 +4,81 @@ import time
 import opt_einsum as oe
 import scipy.sparse as spl
 import scipy.sparse.linalg as sl
+import pickle
+import os
 # import cupy as cp
 ################################################################################
 # TOOLS FOR TTN file                                                           #
 ################################################################################
 torch.set_printoptions(10)
 
-def create_cache_tensor(*dims, backend='torch'):
+def timer(func):
+    """ Wrapper for store_time method of class TreeData """
+    @functools.wraps(func)
+    def f(*args, **kwargs):
+        before = time.time()
+        rv = func(*args, **kwargs)
+        after = time.time()
+        args[0].store_time(after - before)
+        # print(after-before)
+        return rv
+    return f
+
+def store_network(folder_to_store, ham_name, tree_object):
+    """ Stores network in folder 'stored_networks/hamiltonian' where hamiltonian can differ
+    per class instance of Do_experiment'"""
+    temp_folder = folder_to_store
+    temp_folder += '/' + ham_name
+    if not os.path.exists(temp_folder):
+        os.makedirs(temp_folder)
+
+    network_folder = temp_folder + '/'
+    if not os.path.exists(network_folder):
+        os.makedirs(network_folder)
+
+    file_name = tree_object.file_name+'.pickle'
+    file_name = temp_folder+'/'+file_name
+
+    with open(file_name, 'wb') as data:
+        pickle.dump(tree_object, data)
+    print('Network stored in %s as %s'%(network_folder, tree_object.file_name+'.pickle'))
+
+def load_network(folder_to_check, ham_name, network_name, print_load = True):
+    if type(network_name) != str:
+        raise TypeError('path is not of type string')
+
+    elif not os.path.exists(folder_to_check+'/'+ham_name):
+        raise FileNotFoundError('No folder %s found '%(ham_name))
+    elif os.path.exists(folder_to_check+'/'+ham_name) and not os.path.exists(folder_to_check+'/'+ham_name+'/'+network_name):
+        raise FileNotFoundError('No file %s found in folder %s'%(network_name, ham_name))
+    else:
+        path_to_network = folder_to_check+'/'+ham_name+'/'+network_name
+        with open(path_to_network, 'rb') as data:
+            tree_object = pickle.load(data)
+        if print_load:
+            print('Network %s loaded'%(tree_object.file_name))
+        return tree_object
+
+def create_cache_tensor(*dims, ttype, backend='torch'):
     for i in dims:
         if type(i) == float:
             print(i, type(i))
             print("type is not int m8")
             raise TypeError
     if backend == 'torch':
-        tens = torch.zeros(*dims, dtype = torch.float32, device='cuda:0')
+        tens = torch.zeros(*dims, dtype=ttype, device='cuda:0')
     elif backend == 'numpy':
         tens = np.zeros(dims)
     return tens
 
-def create_tensor(*dims, backend = 'torch'):
+def create_tensor(*dims, ttype, backend = 'torch'):
     for i in dims:
         if type(i) == float:
             print(i, type(i))
             print("type is not int m8")
             raise TypeError
     if backend == 'torch':
-        tens = torch.rand(*dims, dtype=torch.float32, device='cuda:0')
+        tens = torch.rand(*dims, dtype=ttype, device='cuda:0')
         tens = tens.T.svd(some=True)[0]
         tens = tens.T.reshape(*dims)
     elif backend == 'numpy':
@@ -37,7 +86,7 @@ def create_tensor(*dims, backend = 'torch'):
         tens = np.linalg.svd(tens, full_matrices = False)[-1]
     return tens
 
-def create_sym_tensor(*dims, backend='torch'):
+def create_sym_tensor(*dims, ttype, backend='torch'):
     """ docstring for create_sym_tensor """
     for i in dims:
         if type(i) == float:
@@ -53,8 +102,8 @@ def create_sym_tensor(*dims, backend='torch'):
         tens = tens.reshape(*dims)
 
     elif backend=='torch':
-        # tens = torch.rand(*dims,dtype = torch.double, device='cuda:0')
-        tens = torch.cuda.FloatTensor(*dims).random_(0, 1)
+        tens = torch.ones(*dims, dtype = ttype, device='cuda:0').random_(0,1)
+        # tens = torch.cuda.FloatTensor(*dims).random_(0, 1)
         tens.add_(tens.transpose(2,1))
         # transpose is need, for explanation see:
         # https://github.com/pytorch/pytorch/issues/24900
@@ -64,7 +113,7 @@ def create_sym_tensor(*dims, backend='torch'):
         return tens
 
     elif backend=='numpy':
-        tens = np.random.uniform(0,10,[*dims])
+        tens = np.random.uniform(0,10,[*dims], dtype=ttype)
         tens = tens + np.transpose(tens, (0, 2, 1))
         tens = np.linalg.svd(tens.reshape(dims[0],dims[1]**2), full_matrices=False)[-1]
         tens = tens.reshape(*dims)
@@ -80,6 +129,7 @@ def get_absolute_distance(lattice, spacing, constraints):
 
 def get_bonds(lattice, sub_lattice, spacings):
     """ docstring for get_bonds """
+
     for space in spacings:
         linear_size = lattice.shape[0]
         left_boundaries, lower_boundaries = [], []
@@ -347,36 +397,54 @@ def contract_network(operators, network, contract_type='env'):
 
 def get_energy(tree_object, node):
     """ Docstring for get_energy() """
+    temp = 0
     if tree_object.backend == 'torch':
-        temp = torch.cuda.FloatTensor([0])
+        for operators in tree_object.hamiltonian:
+
+            if operators[1] > 0:
+                for network in node.vertical_networks:
+                    # print('ver ',contract_network(operators, network,
+                    # contract_type='energy').size())
+                    temp += (contract_network(operators, network,
+                            contract_type='energy')*operators[-1][0]).item()
+
+                for network in node.horizontal_networks:
+                    # print('hor ',contract_network(operators, network,
+                    # contract_type='energy').size())
+                    temp += (contract_network(operators, network,
+                            contract_type='energy')*operators[-1][1]).item()
+            else:
+                for network in node.one_site_networks:
+                    # print('one', contract_network(operators, network,
+                    # contract_type='energy').size())
+                    temp += (contract_network(operators, network,
+                            contract_type='energy')*operators[-1][0]).item()
+
     elif tree_object.backend == 'numpy':
-        temp = 0
+        for operators in tree_object.hamiltonian:
 
-    for operators in tree_object.hamiltonian:
+            if operators[1] > 0:
+                for network in node.vertical_networks:
+                    # print('ver ',contract_network(operators, network,
+                    # contract_type='energy').size())
+                    temp += contract_network(operators, network,
+                            contract_type='energy')*operators[-1][0]
 
-        if operators[1] > 0:
-            for network in node.vertical_networks:
-                # print('ver ',contract_network(operators, network,
-                # contract_type='energy').size())
-                temp += contract_network(operators, network,
-                        contract_type='energy')*operators[-1][0]
+                for network in node.horizontal_networks:
+                    # print('hor ',contract_network(operators, network,
+                    # contract_type='energy').size())
+                    temp += contract_network(operators, network,
+                            contract_type='energy')*operators[-1][1]
+            else:
+                for network in node.one_site_networks:
+                    # print('one', contract_network(operators, network,
+                    # contract_type='energy').size())
+                    temp += contract_network(operators, network,
+                            contract_type='energy')*operators[-1][0]
 
-            for network in node.horizontal_networks:
-                # print('hor ',contract_network(operators, network,
-                # contract_type='energy').size())
-                temp += contract_network(operators, network,
-                        contract_type='energy')*operators[-1][1]
-        else:
-            for network in node.one_site_networks:
-                # print('one', contract_network(operators, network,
-                # contract_type='energy').size())
-                temp += contract_network(operators, network,
-                        contract_type='energy')*operators[-1][0]
-
-    # tree_object.energy_per_sweep_list.append(temp)
-    # print(temp.size(), type(temp))
     return temp
 
+# @timer
 def optimize_tensor(tree_object, node):
     """ VOID: optimize method for a single tensor in the Tree Tensor Network using optimal einsum"""
 
