@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
     test_speed = True
     if test_speed:
-        n_range = np.arange(0,10)
+        n_range = np.arange(0,100)
         times = []
         for n in n_range:
             ti2 = time.time()
@@ -46,6 +46,7 @@ if __name__ == '__main__':
         # tt.store_network('tests','ising', network)
         print(tf2-ti2)
         print(np.mean(times)*500/3600)
+        print(tt.two_point_correlator(network, [1,2],network.hamiltonian[0][0]))
         rho_t, rho_r = tt.rho_bot_sites(network, [1,2])
         tt.rho_layer(network, 1)
         # tt.rho_layer(network, 1)

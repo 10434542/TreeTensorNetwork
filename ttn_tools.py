@@ -728,14 +728,14 @@ def rho_layer(tree_object, layer):
     elif tree_object.backend == 'numpy':
         legs = np.arange(1, len(tree_object.root.current_tensor.shape)*(layer+1)+2)
 
-    print(legs)
-
-    print([j.value for j in temp_rho_list])
 
 
-def two_point_correlator(tree_object, operators):
+def two_point_correlator(tree_object, sites, operators):
     # TODO: write this function (can use rho_bot_sites)
-    pass
+    to_contract = rho_bot_sites(tree_object, sites)[0]
+    correlation_value = oe.contract(to_contract, [1,2,3,4], operators[0], [1,3],
+                                    operators[1], [2,4])
+    return correlation_value
 
 
 def mean_two_point_correlatior_i_ir(tree_object, operators):
