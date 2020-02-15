@@ -27,7 +27,7 @@ if __name__ == '__main__':
 
     test_speed = True
     if test_speed:
-        n_range = np.arange(0,100)
+        n_range = np.arange(0,10)
         times = []
         for n in n_range:
             ti2 = time.time()
@@ -43,9 +43,12 @@ if __name__ == '__main__':
             print(tt.get_energy(network, network.root))
             # print(torch.cuda.memory_reserved(device='cuda:0')/(1024**2))
             # print('iteration %s has %smb reserved'%(i, torch.cuda.memory_reserved(device='cuda:0')/(1024**2)))
-        tt.store_network('tests','ising', network)
+        # tt.store_network('tests','ising', network)
         print(tf2-ti2)
         print(np.mean(times)*500/3600)
+        rho_t, rho_r = tt.rho_bot_sites(network, [1,2])
+        tt.rho_layer(network, 1)
+        # tt.rho_layer(network, 1)
         # gs = tt.exact_energy(16, nham.ising_transverse_x(3.), 2)
         # a = sl.eigsh(gs, which='SA')
         # print(a[0][0])

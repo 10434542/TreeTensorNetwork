@@ -10,6 +10,9 @@ import os
 ################################################################################
 # TOOLS FOR TTN file                                                           #
 ################################################################################
+
+# TODO: Entire file: add docstrings
+
 torch.set_printoptions(10)
 
 def timer(func):
@@ -124,6 +127,8 @@ def create_sym_tensor(*dims, ttype, backend='torch'):
     return tens
 
 def get_absolute_distance(lattice, spacing, constraints):
+    # TODO: write this function as complementary function to get_bonds
+    # then rewrite get_bonds in terms of this function
     """ docstring for get_absolute_distance() """
     pass
 
@@ -599,3 +604,140 @@ def exact_energy(N, hamiltonian, dimension):
 
 
         return h
+
+def rho_bot_sites(tree_object, sites):
+        temporary_network = []
+        for tensor in tree_object.node_list:
+            for site in sites:
+                if site in tensor.lattice:
+                    temporary_network.append(tensor)
+
+        unique_network = []
+        for i in temporary_network:
+            if i not in unique_network:
+                unique_network.append(i)
+            else:
+                continue
+
+        new_open_legs = np.arange(1, 2*(len(sites))+1)*-1
+        new_bra_open_legs, new_ket_open_legs = np.array_split(new_open_legs, 2)
+        new_bra_open_legs, new_ket_open_legs = list(reversed(new_bra_open_legs.tolist())), list(reversed(new_ket_open_legs.tolist()))
+        all_legs = []
+
+        for current_node in unique_network:
+            if current_node.isRoot():
+
+                current_node.bralegs = np.array([1,2,3])
+                current_node.ketlegs = np.array([1, None, None])
+
+                if current_node.left in unique_network and not current_node.right in unique_network:
+                    current_node.ketlegs[2] = current_node.bralegs[2]
+                elif current_node.right in unique_network and not current_node.left in unique_network:
+                    current_node.ketlegs[1] = current_node.bralegs[1]
+
+                mask_legs = np.where(current_node.ketlegs == None)[0]
+                new_values = np.arange(np.max(current_node.bralegs)+1,
+                    np.max(current_node.bralegs)+mask_legs.size+1)
+                current_node.ketlegs[mask_legs] = new_values
+                max_leg = np.max(np.array([np.max(current_node.ketlegs), np.max(current_node.bralegs)]))
+
+            if not current_node.isRoot():
+                current_node.bralegs = [None]*len(current_node.current_tensor.shape)
+                current_node.ketlegs = [None]*len(current_node.current_tensor.shape)
+                current_node.bralegs, current_node.ketlegs = np.array(current_node.bralegs), np.array(current_node.ketlegs)
+
+                if current_node.isLeftChild():
+                    current_node.bralegs[0] = current_node.parent.bralegs[1]
+                    current_node.ketlegs[0] = current_node.parent.ketlegs[1]
+
+                if current_node.isRightChild():
+                    current_node.bralegs[0] = current_node.parent.bralegs[2]
+                    current_node.ketlegs[0] = current_node.parent.ketlegs[2]
+
+                if current_node.layer != tree_object.cut:
+                    mask_legs = np.where(current_node.bralegs == None)[0]
+                    new_bralegs = np.arange(max_leg+1, max_leg+mask_legs.size+1)
+                    current_node.bralegs[mask_legs] = new_bralegs
+                    max_leg = np.max(current_node.bralegs)
+
+                # for lower legs
+                if current_node.left in unique_network and current_node.right in unique_network:
+                    mask_legs = np.where(current_node.ketlegs == None)[0]
+                    current_node.ketlegs[mask_legs] = np.arange(max_leg+1, max_leg+mask_legs.size+1)
+                    max_leg = np.max(current_node.ketlegs)
+
+                elif current_node.left in unique_network and not current_node.right in unique_network:
+                    current_node.ketlegs[2] = current_node.bralegs[2]
+                    current_node.ketlegs[1] = max_leg+1
+                    max_leg = np.max(current_node.ketlegs)
+
+                elif current_node.right in unique_network and not current_node.left in unique_network:
+                    current_node.ketlegs[1] = current_node.bralegs[1]
+                    current_node.ketlegs[2] = max_leg+1
+                    max_leg = np.max(current_node.ketlegs)
+
+                # if current_node = bottem tensor
+                elif not current_node.left in unique_network and not current_node.right in unique_network:
+                    for site in sites:
+                        if site in current_node.lattice.flatten():
+                            index_to_mask = np.where(current_node.lattice.flatten() == site)[0]+1
+                            current_node.bralegs[index_to_mask] = new_bra_open_legs.pop()
+                            current_node.ketlegs[index_to_mask] = new_ket_open_legs.pop()
+                    legs_to_mask = np.where(current_node.bralegs == None)[0]
+                    new_closed_legs = np.arange(max_leg+1, legs_to_mask.size+max_leg+1)
+                    current_node.bralegs[legs_to_mask], current_node.ketlegs[legs_to_mask] = new_closed_legs, new_closed_legs
+                    max_leg = np.max(np.array([current_node.ketlegs, np.array(current_node.bralegs)]))
+            all_legs.extend((current_node.bralegs, current_node.ketlegs))
+        reduced_density_matrix_list = []
+        order_legs = [i for i in range(1, max_leg+1)][::-1]
+        for i in unique_network:
+            reduced_density_matrix_list.extend((i,i))
+        new_shape = 2**int(new_open_legs.size/2)
+
+        # print(all_legs)
+        all_legs_2 = [np.copy(l) for l in all_legs]
+        tensor_list = []
+        f = [l.tolist() for l in all_legs_2]
+        k = [m for n in f for m in n]
+
+        out = np.arange(0, np.abs(np.min(k)))[::-1]
+        for s2 in all_legs_2:
+            s2+= np.abs(np.min(k))
+        # print(all_legs_2)
+        new_path = []
+        # print(out)
+        for m,n in zip(reduced_density_matrix_list, all_legs_2):
+            new_path.append(m.current_tensor)
+            new_path.append(n)
+
+        og_reduced_density_matrix = oe.contract(*new_path, out, optimize='greedy')
+        reduced_density_matrix = og_reduced_density_matrix.reshape(new_shape, new_shape)
+        return og_reduced_density_matrix, reduced_density_matrix
+
+
+def rho_layer(tree_object, layer):
+    # TODO: write this function (for any n-layer binary tree)
+    """ Docstring for rho_layer() """
+    temp_rho_list = []
+    for a_node in tree_object.node_list:
+        if (a_node.layer <= layer) and (a_node.value[-1] != '1'):
+            temp_rho_list.append(a_node)
+    temp_rho_list.sort(key = lambda x: x.layer)
+    if tree_object.backend == 'torch':
+        legs = np.arange(1, len(tree_object.root.current_tensor.size())*(layer+1)+2)
+    elif tree_object.backend == 'numpy':
+        legs = np.arange(1, len(tree_object.root.current_tensor.shape)*(layer+1)+2)
+
+    print(legs)
+
+    print([j.value for j in temp_rho_list])
+
+
+def two_point_correlator(tree_object, operators):
+    # TODO: write this function (can use rho_bot_sites)
+    pass
+
+
+def mean_two_point_correlatior_i_ir(tree_object, operators):
+    # TODO: write this function using two_point_correlator
+    pass
