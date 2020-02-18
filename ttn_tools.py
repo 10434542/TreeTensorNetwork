@@ -6,12 +6,17 @@ import scipy.sparse as spl
 import scipy.sparse.linalg as sl
 import pickle
 import os
+import itertools as it
+import functools
 # import cupy as cp
 ################################################################################
 # TOOLS FOR TTN file                                                           #
 ################################################################################
 
-# TODO: Entire file: add docstrings
+# TODO:
+# write get_absolute_distance, adjust get_bonds with this impl
+# write mean_two_point_correlatior_i_ir
+# Entire file: add docstrings
 
 torch.set_printoptions(10)
 
@@ -105,84 +110,110 @@ def create_sym_tensor(*dims, ttype, backend='torch'):
         tens = tens.reshape(*dims)
 
     elif backend=='torch':
-        tens = torch.ones(*dims, dtype = ttype, device='cuda:0').random_(0,1)
-        # tens = torch.cuda.FloatTensor(*dims).random_(0, 1)
+        # so random_(0,1) just fills the tensor with 1 1 and the rest 0:
+        # resulted in a "bug" where by accidant ising worked but heisenberg did not
+        # anyhow, it is fixed now...
+        tens = torch.ones(*dims, dtype = ttype, device='cuda:0').random_(0,10)
+
         tens.add_(tens.transpose(2,1))
         # transpose is need, for explanation see:
         # https://github.com/pytorch/pytorch/issues/24900
         tens = tens.reshape(dims[0],dims[1]*dims[1]).T
         u, s, v = tens.svd(some=True)
         tens = u.T.reshape(*dims)
-        return tens
+        # print(tens)
+        # return tens
 
     elif backend=='numpy':
-        tens = np.random.uniform(0,10,[*dims], dtype=ttype)
+        tens = np.random.uniform(0,10,[*dims])
         tens = tens + np.transpose(tens, (0, 2, 1))
         tens = np.linalg.svd(tens.reshape(dims[0],dims[1]**2), full_matrices=False)[-1]
         tens = tens.reshape(*dims)
-
+        print(tens)
     else:
         tens=None
 
     return tens
 
-def get_absolute_distance(lattice, spacing, constraints):
-    # TODO: write this function as complementary function to get_bonds
-    # then rewrite get_bonds in terms of this function
-    """ docstring for get_absolute_distance() """
-    pass
-
 def get_bonds(lattice, sub_lattice, spacings):
     """ docstring for get_bonds """
 
+    left_boundaries = {i:[] for i in spacings}
+    lower_boundaries = {i:[] for i in spacings}
+    vertical_inner_bonds = {i:[] for i in spacings}
+    horizontal_inner_bonds = {i:[] for i in spacings}
+    single_sites = {0:[]}
+
     for space in spacings:
         linear_size = lattice.shape[0]
-        left_boundaries, lower_boundaries = [], []
-        vertical_inner_bonds, horizontal_inner_bonds = [], []
-        single_sites = []
         for i in sub_lattice.flatten():
             locations = np.where(lattice==i)
             m, n = *locations[0], *locations[1]
             original_location = lattice[m,n]
-            if (lattice[m,(n-space)%linear_size] not in sub_lattice) and (space>0):
-                left_boundaries.append([original_location, lattice[m,(n-space)%linear_size]][::-1])
-            if (lattice[(m+space)%linear_size, n] not in sub_lattice) and(space>0):
-                lower_boundaries.append([original_location, lattice[(m+space)%linear_size, n]][::-1])
-            if space>0:
-                horizontal_inner_bonds.append([original_location, lattice[m, (n+space)%linear_size]])
-                vertical_inner_bonds.append([original_location, lattice[(m-space)%linear_size,n]])
-            single_sites.append([original_location])
+            # nearest-neighbour bonds
+            if space != 1.5 and (space>0):
+                if (lattice[m,(n-int(space))%linear_size] not in sub_lattice):
+                    left_boundaries[space].append([original_location,
+                                lattice[m,(n-int(space))%linear_size]][::-1])
+                if (lattice[(m+int(space))%linear_size, n] not in sub_lattice):
+                    lower_boundaries[space].append([original_location,
+                                lattice[(m+int(space))%linear_size, n]][::-1])
 
+                horizontal_inner_bonds[space].append([original_location, lattice[m, (n+int(space))%linear_size]])
+                vertical_inner_bonds[space].append([original_location, lattice[(m-int(space))%linear_size,n]])
+            # next-nearest-neighbour bonds
+                # single_sites.append([original_location])
+            if space == 1.5:
+                if (lattice[(m-int(space))%linear_size,(n-int(space))%linear_size] not in sub_lattice):
+                    left_boundaries[space].append([original_location,
+                                lattice[(m-int(space))%linear_size,(n-int(space))%linear_size]][::-1])
+                if (lattice[(m+int(space))%linear_size, (n-int(space))%linear_size] not in sub_lattice):
+                    lower_boundaries[space].append([original_location,
+                                lattice[(m+int(space))%linear_size, (n-int(space))%linear_size]][::-1])
+                horizontal_inner_bonds[space].append([original_location,
+                                lattice[(m+int(space))%linear_size, (n+int(space))%linear_size]])
+                vertical_inner_bonds[space].append([original_location,
+                                lattice[(m-int(space))%linear_size,(n+int(space))%linear_size]])
+            if (space == 0) or (space ==0.0):
+                single_sites[space].append([original_location])
+
+            # elif space == 0:
     return (horizontal_inner_bonds, vertical_inner_bonds, single_sites, lower_boundaries,
         left_boundaries)
 
-def get_single_network(list_of_nodes, bond):
+def get_single_network(list_of_nodes, bondtype, bond):
     """ Docstring for get_single_network """
     temporary_network = []
+    # if (5 in bond) and (1 in bond):
     if len(bond) == 2:
         for a_node in list_of_nodes:
-            if any(a_bond[1] == bond[1] for a_bond in a_node.vertical_two_site_terms):
-                temporary_network.append(a_node)
-            if any(a_bond[1] == bond[1] for a_bond in a_node.horizontal_two_site_terms):
-                temporary_network.append(a_node)
-            if any(a_bond[1] == bond[1] for a_bond in a_node.vertical_bc_terms):
-                temporary_network.append(a_node)
-            if any(a_bond[1] == bond[1] for a_bond in a_node.horizontal_bc_terms):
-                temporary_network.append(a_node)
+            for a_bond in a_node.vertical_two_site_terms[bondtype]:
+                if (a_bond[1] == bond[1]) and (a_bond[0] == bond[0]):
+                    temporary_network.append(a_node)
+            for a_bond in a_node.horizontal_two_site_terms[bondtype]:
+                if (a_bond[1] == bond[1]) and (a_bond[0] == bond[0]):
+                    temporary_network.append(a_node)
+            for a_bond in a_node.vertical_bc_terms[bondtype]:
+                if (a_bond[1] == bond[1]) and (a_bond[0] == bond[0]):
+                    temporary_network.append(a_node)
+            for a_bond in a_node.horizontal_bc_terms[bondtype]:
+                if (a_bond[1] == bond[1]) and (a_bond[0] == bond[0]):
+                    temporary_network.append(a_node)
     if len(bond) == 1:
         for a_node in list_of_nodes:
-            if any(a_bond[0] == bond[0] for a_bond in a_node.one_site_terms):
+            if any(a_bond[0] == bond[0] for a_bond in a_node.one_site_terms[bondtype]):
                 temporary_network.append(a_node)
-
     temporary_network = list(set(temporary_network))
     temporary_network.sort(key=lambda x: x.layer)
-    return {'bond':  bond, 'temporary_network': temporary_network}
+
+    return {'bond':  bond, 'bondspace': bondtype, 'temporary_network': temporary_network}
 
 def get_legs(cut, node, network):
     """ Docstring for get_legs() """
 
     for current_network in network:
         bond = current_network['bond']
+
         tensors_to_loop_over = current_network['temporary_network']
         # maybe add sort of tensors_to_loop_over over here, first value,
         # then layer
@@ -311,6 +342,7 @@ def get_legs(cut, node, network):
         current_network['environment'] = environment_tree
         current_network['environment_legs'] = new_environment_legs
 
+
 def get_optimal_order(node, dict_of_networks, optimize_type):
     """ Docstring for get_optimal_orders() """
     copied_environment_legs = [np.copy(l) for l in
@@ -388,83 +420,90 @@ def contract_network(operators, network, contract_type='env'):
 
         return oe.contract(*path, network['out_list'],
                     optimize=network['einsum_path'])
+
     elif contract_type == 'energy':
         for m,n in zip(network['entire_network'], network['einsum_energy_indices']):
             path.append(m.current_tensor)
+            # print(m.current_tensor)
             path.append(n)
 
         for m,n in zip(temp_operators, network['einsum_energy_indices'][-len(temp_operators):]):
             path.append(m)
             path.append(n)
             # to_contract = [*[m.cur_tensor, n] in zip(network['entire_network'], network['full_legs'])]
+        # print(oe.contract(*path, optimize=network['einsum_path_energy']))
         return oe.contract(*path, optimize=network['einsum_path_energy'])
 
-
+# no bug here
 def get_energy(tree_object, node):
     """ Docstring for get_energy() """
     temp = 0
     if tree_object.backend == 'torch':
         for operators in tree_object.hamiltonian:
-
             if operators[1] > 0:
                 for network in node.vertical_networks:
-                    # print('ver ',contract_network(operators, network,
-                    # contract_type='energy').size())
-                    temp += (contract_network(operators, network,
-                            contract_type='energy')*operators[-1][0]).item()
-
+                    if np.allclose(operators[1], network['bondspace']):
+                        temp += (contract_network(operators, network,
+                                contract_type='energy')*operators[-1][0]).item()
                 for network in node.horizontal_networks:
-                    # print('hor ',contract_network(operators, network,
-                    # contract_type='energy').size())
-                    temp += (contract_network(operators, network,
-                            contract_type='energy')*operators[-1][1]).item()
+                    if np.allclose(operators[1], network['bondspace']):
+
+
+                        temp += (contract_network(operators, network,
+                                contract_type='energy')*operators[-1][1]).item()
+
             else:
                 for network in node.one_site_networks:
-                    # print('one', contract_network(operators, network,
-                    # contract_type='energy').size())
-                    temp += (contract_network(operators, network,
-                            contract_type='energy')*operators[-1][0]).item()
+                    if np.allclose(operators[1], network['bondspace']):
+
+                        temp += (contract_network(operators, network,
+                                contract_type='energy')*operators[-1][0]).item()
 
     elif tree_object.backend == 'numpy':
         for operators in tree_object.hamiltonian:
 
             if operators[1] > 0:
                 for network in node.vertical_networks:
-                    # print('ver ',contract_network(operators, network,
-                    # contract_type='energy').size())
-                    temp += contract_network(operators, network,
-                            contract_type='energy')*operators[-1][0]
+                    if np.allclose(operators[1], network['bondspace']):
+                        # print('ver ',contract_network(operators, network,
+                        # contract_type='energy').size())
+                        temp += contract_network(operators, network,
+                                contract_type='energy')*operators[-1][0]
 
                 for network in node.horizontal_networks:
-                    # print('hor ',contract_network(operators, network,
-                    # contract_type='energy').size())
-                    temp += contract_network(operators, network,
-                            contract_type='energy')*operators[-1][1]
+                    if np.allclose(operators[1], network['bondspace']):
+
+                        # print('hor ',contract_network(operators, network,
+                        # contract_type='energy').size())
+                        temp += contract_network(operators, network,
+                                contract_type='energy')*operators[-1][1]
             else:
                 for network in node.one_site_networks:
-                    # print('one', contract_network(operators, network,
-                    # contract_type='energy').size())
-                    temp += contract_network(operators, network,
-                            contract_type='energy')*operators[-1][0]
+                    if np.allclose(operators[1], network['bondspace']):
+
+                        # print('one', contract_network(operators, network,
+                        # contract_type='energy').size())
+                        temp += contract_network(operators, network,
+                                contract_type='energy')*operators[-1][0]
 
     return temp
 
-# @timer
+@timer
 def optimize_tensor(tree_object, node):
     """ VOID: optimize method for a single tensor in the Tree Tensor Network using optimal einsum"""
 
     if tree_object.backend == 'torch':
         node.cache_tensor.zero_()
         for operators in tree_object.hamiltonian:
-
-            if operators[1] > 0:
-                for network in node.vertical_networks:
+            for network in node.vertical_networks:
+                if np.allclose(operators[1], network['bondspace']):
                     node.cache_tensor.add_(contract_network(operators, network)*operators[-1][0])
-
-                for network in node.horizontal_networks:
+            for network in node.horizontal_networks:
+                if np.allclose(operators[1], network['bondspace']):
                     node.cache_tensor.add_(contract_network(operators, network)*operators[-1][1])
-            else:
-                for network in node.one_site_networks:
+
+            for network in node.one_site_networks:
+                if np.allclose(operators[1], network['bondspace']):
                     node.cache_tensor.add_(contract_network(operators, network)*operators[-1][0])
 
         new_shapes = node.cache_tensor.shape
@@ -479,14 +518,19 @@ def optimize_tensor(tree_object, node):
         for operators in tree_object.hamiltonian:
 
             if operators[1] > 0:
+
                 for network in node.vertical_networks:
-                    node.cache_tensor+=contract_network(operators, network)*operators[-1][0]
+                    # print(network['bondspace'],operators[1])
+                    if np.allclose(operators[1], network['bondspace']):
+                        node.cache_tensor+=contract_network(operators, network)*operators[-1][0]
 
                 for network in node.horizontal_networks:
-                    node.cache_tensor+=contract_network(operators, network)*operators[-1][1]
+                    if np.allclose(operators[1], network['bondspace']):
+                        node.cache_tensor+=contract_network(operators, network)*operators[-1][1]
             else:
                 for network in node.one_site_networks:
-                    node.cache_tensor+=contract_network(operators, network)*operators[-1][0]
+                    if np.allclose(operators[1], network['bondspace']):
+                        node.cache_tensor+=contract_network(operators, network)*operators[-1][0]
 
         new_shapes = node.cache_tensor.shape
         u, s, v = np.linalg.svd(node.cache_tensor.reshape(new_shapes[0],
@@ -715,29 +759,112 @@ def rho_bot_sites(tree_object, sites):
         return og_reduced_density_matrix, reduced_density_matrix
 
 
-def rho_layer(tree_object, layer):
-    # TODO: write this function (for any n-layer binary tree)
-    """ Docstring for rho_layer() """
-    temp_rho_list = []
-    for a_node in tree_object.node_list:
-        if (a_node.layer <= layer) and (a_node.value[-1] != '1'):
-            temp_rho_list.append(a_node)
-    temp_rho_list.sort(key = lambda x: x.layer)
-    if tree_object.backend == 'torch':
-        legs = np.arange(1, len(tree_object.root.current_tensor.size())*(layer+1)+2)
-    elif tree_object.backend == 'numpy':
-        legs = np.arange(1, len(tree_object.root.current_tensor.shape)*(layer+1)+2)
-
-
-
 def two_point_correlator(tree_object, sites, operators):
-    # TODO: write this function (can use rho_bot_sites)
+    """ Docstring for two_point_correlator """
     to_contract = rho_bot_sites(tree_object, sites)[0]
-    correlation_value = oe.contract(to_contract, [1,2,3,4], operators[0], [1,3],
-                                    operators[1], [2,4])
+    if tree_object.backend == 'torch':
+        correlation_value = oe.contract(to_contract, [1,2,3,4], operators[0], [1,3],
+                                        operators[1], [2,4]).item()
+    elif tree_object.backend == 'numpy':
+        correlation_value = oe.contract(to_contract, [1,2,3,4], operators[0], [1,3],
+                                        operators[1], [2,4])
+
     return correlation_value
 
 
-def mean_two_point_correlatior_i_ir(tree_object, operators):
-    # TODO: write this function using two_point_correlator
-    pass
+def one_point_correlator(tree_object, site, operator):
+    """ Docstring for one_point_correlator """
+    to_contract = rho_bot_sites(tree_object, site)[0]
+    if tree_object.backend == 'torch':
+        correlation_value = oe.contract(to_contract, [1,2], operator, [1,2]).item()
+    elif tree_object.backend == 'numpy':
+        correlation_value = oe.contract(to_contract, [1,2], operator, [1,2])
+    return correlation_value
+
+
+def mean_two_point_correlator_i_ir(tree_object, operators, correct_magnetization):
+
+    square_size = np.sqrt(tree_object.root.lattice.flatten().size).astype(int)
+    lattice = tree_object.root.lattice
+    bound = int(square_size/2)
+    tiled_lattice = np.tile(lattice, (3,3))
+    tiled_lattices = []
+
+    # this is it:
+    for x in range(square_size, 2*square_size):
+        for y in range(square_size, 2*square_size):
+            sub_tiled_lattice = tiled_lattice[x-bound:x+bound+1,y-bound:y+bound+1]
+            tiled_lattices.append([tiled_lattice[x,y],sub_tiled_lattice])
+
+    correlation_matrices = []
+    for middle_point, sub_lattice in tiled_lattices:
+
+        temp_correlation = np.zeros(sub_lattice.shape)
+        # print(middle_point,sub_lattice)
+        for x in range(square_size+1):
+            for y in range(square_size+1):
+                if middle_point != sub_lattice[x,y]:
+
+                    temp_correlation[x,y] = two_point_correlator(tree_object,
+                        [middle_point, sub_lattice[x,y]], operators)
+                else:
+                    temp_correlation[x,y]= 1.0 # correlation with itself is by def 1
+
+        correlation_matrices.append(temp_correlation)
+    # print(correlation_matrices)
+    mean_correlation = np.mean(np.array(correlation_matrices), axis =0)
+    magnetizations = []
+
+    for x, y in list(it.combinations(lattice.flatten(),2)):
+        magnetizations.append(one_point_correlator(tree_object, [x], operators[0])*
+                              one_point_correlator(tree_object, [y], operators[0]))
+
+    mean_magnetization = np.mean(magnetizations)
+    if correct_magnetization:
+        mean_correlation -= np.ones(mean_correlation.shape)*mean_magnetization
+    return mean_correlation, mean_magnetization
+
+def optimize_network(tree_object, probe_length, var_error, max_iterations, printf = False, exact = False):
+    variance_error = 10
+    counter = 0
+    probed_energies = []
+    if exact:
+        loop_length = 1
+    else:
+        loop_length = tree_object.cut+1
+    for j in range(probe_length):
+        # begin 1 sweep
+        temp = tree_object.root
+        for i in range(loop_length): # works better than writing it out since we recursively take the .left of current node
+            optimize_tensor(tree_object, temp)
+            temp = temp.left
+        # end one sweep
+        probed_energies.append(get_energy(tree_object, tree_object.root))
+    probed_energies = np.array(probed_energies, dtype = 'float64')
+    while(variance_error > var_error):
+        probed_energies = np.roll(probed_energies, -1)
+        temp = tree_object.root
+        for i in range(loop_length):
+            optimize_tensor(tree_object, temp)
+            temp = temp.left
+        # end one sweep
+        temp_energy = get_energy(tree_object, tree_object.root)
+        probed_energies[-1] = temp_energy
+        variance_error = np.var(probed_energies)
+
+        tree_object.energy_per_sweep_list.append(temp_energy)
+        delta_energy = np.abs(np.abs(probed_energies[-1])-np.abs(probed_energies[-2]))
+        # print(probed_energies, get_energy_v2(tree_object, tree_object.root))
+        if printf:
+            print('var error:', variance_error,
+            ' delta E:', np.abs(probed_energies[-1])-np.abs(probed_energies[-2]),
+            ' energy: ',get_energy(tree_object, tree_object.root))
+        counter += 1
+        if max_iterations != None:
+            if (counter > max_iterations) or (np.abs(delta_energy)<1e-15):
+                print('ended with variance:', variance_error)
+                tree_object.current_iteration = counter
+                break
+
+    print('converged up to variance of:%s at iteration %s'%(variance_error, counter))
+    return

@@ -240,6 +240,7 @@ class TreeTensorNetwork:
             temp_bonds = tt.get_bonds(self.root.lattice, i.lattice, self.spacings)
             (i.horizontal_two_site_terms, i.vertical_two_site_terms, i.one_site_terms,
             i.vertical_bc_terms, i.horizontal_bc_terms) = temp_bonds
+            # print(type(i.horizontal_two_site_terms))
 
 
     def get_orders(self):
@@ -276,13 +277,18 @@ class TreeTensorNetwork:
         """ Docstring for prepare_networks """
         # can't zip since lengths of lists can differ in size
         for node in self.node_list:
-            for a_bond in node.vertical_two_site_terms:
-                node.vertical_networks.append(tt.get_single_network(self.node_list, a_bond))
-            for a_bond in node.horizontal_two_site_terms:
-                node.horizontal_networks.append(tt.get_single_network(self.node_list, a_bond))
-            for a_bond in node.vertical_bc_terms:
-                node.vertical_networks.append(tt.get_single_network(self.node_list, a_bond))
-            for a_bond in node.horizontal_bc_terms:
-                node.horizontal_networks.append(tt.get_single_network(self.node_list, a_bond))
-            for a_bond in node.one_site_terms:
-                node.one_site_networks.append(tt.get_single_network(self.node_list, a_bond))
+            for bondspace, bondlist in node.vertical_two_site_terms.items():
+                for a_bond in bondlist:
+                    node.vertical_networks.append(tt.get_single_network(self.node_list, bondspace, a_bond))
+            for bondspace, bondlist in node.horizontal_two_site_terms.items():
+                for a_bond in bondlist:
+                    node.horizontal_networks.append(tt.get_single_network(self.node_list, bondspace, a_bond))
+            for bondspace, bondlist in node.vertical_bc_terms.items():
+                for a_bond in bondlist:
+                    node.vertical_networks.append(tt.get_single_network(self.node_list, bondspace, a_bond))
+            for bondspace, bondlist in node.horizontal_bc_terms.items():
+                for a_bond in bondlist:
+                    node.horizontal_networks.append(tt.get_single_network(self.node_list, bondspace, a_bond))
+            for bondspace, bondlist in node.one_site_terms.items():
+                for a_bond in bondlist:
+                    node.one_site_networks.append(tt.get_single_network(self.node_list, bondspace, a_bond))
