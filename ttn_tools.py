@@ -8,20 +8,23 @@ import pickle
 import os
 import itertools as it
 import functools
+
 # import cupy as cp
 ################################################################################
 # TOOLS FOR TTN file                                                           #
 ################################################################################
 
 # TODO:
-# write get_absolute_distance, adjust get_bonds with this impl
-# write mean_two_point_correlatior_i_ir
 # Entire file: add docstrings
+
+# not TODO:
+# write absolute distance. Why: Not needed since at most we want next-nearest neighbour
 
 torch.set_printoptions(10)
 
 def timer(func):
-    """ Wrapper for store_time method of class TreeData """
+    """ Wrapper for store_time method of class TreeTensorNetwork, times optimization
+        of a single tensor (Environments + SVD)"""
     @functools.wraps(func)
     def f(*args, **kwargs):
         before = time.time()
@@ -32,7 +35,8 @@ def timer(func):
         return rv
     return f
 
-def store_network(folder_to_store, ham_name, tree_object):
+
+def store_network(tree_object, folder_to_store, ham_name):
     """ Stores network in folder 'stored_networks/hamiltonian' where hamiltonian can differ
     per class instance of Do_experiment'"""
     temp_folder = folder_to_store
@@ -51,6 +55,7 @@ def store_network(folder_to_store, ham_name, tree_object):
         pickle.dump(tree_object, data)
     print('Network stored in %s as %s'%(network_folder, tree_object.file_name+'.pickle'))
 
+
 def load_network(folder_to_check, ham_name, network_name, print_load = True):
     if type(network_name) != str:
         raise TypeError('path is not of type string')
@@ -67,6 +72,7 @@ def load_network(folder_to_check, ham_name, network_name, print_load = True):
             print('Network %s loaded'%(tree_object.file_name))
         return tree_object
 
+
 def create_cache_tensor(*dims, ttype, backend='torch'):
     for i in dims:
         if type(i) == float:
@@ -78,6 +84,7 @@ def create_cache_tensor(*dims, ttype, backend='torch'):
     elif backend == 'numpy':
         tens = np.zeros(dims)
     return tens
+
 
 def create_tensor(*dims, ttype, backend = 'torch'):
     for i in dims:
@@ -93,6 +100,7 @@ def create_tensor(*dims, ttype, backend = 'torch'):
         tens = np.random.rand(*dims)
         tens = np.linalg.svd(tens, full_matrices = False)[-1]
     return tens
+
 
 def create_sym_tensor(*dims, ttype, backend='torch'):
     """ docstring for create_sym_tensor """
@@ -134,6 +142,7 @@ def create_sym_tensor(*dims, ttype, backend='torch'):
         tens=None
 
     return tens
+
 
 def get_bonds(lattice, sub_lattice, spacings):
     """ docstring for get_bonds """
@@ -181,6 +190,7 @@ def get_bonds(lattice, sub_lattice, spacings):
     return (horizontal_inner_bonds, vertical_inner_bonds, single_sites, lower_boundaries,
         left_boundaries)
 
+
 def get_single_network(list_of_nodes, bondtype, bond):
     """ Docstring for get_single_network """
     temporary_network = []
@@ -207,6 +217,7 @@ def get_single_network(list_of_nodes, bondtype, bond):
     temporary_network.sort(key=lambda x: x.layer)
 
     return {'bond':  bond, 'bondspace': bondtype, 'temporary_network': temporary_network}
+
 
 def get_legs(cut, node, network):
     """ Docstring for get_legs() """
@@ -542,6 +553,7 @@ def optimize_tensor(tree_object, node):
         if a_node.value == node.value:
             a_node.current_tensor = node.current_tensor
 
+
 def exact_energy(N, hamiltonian, dimension):
     h = 0.0000
     if dimension == '2D' or dimension == '2d' or dimension == 2:
@@ -648,6 +660,7 @@ def exact_energy(N, hamiltonian, dimension):
 
 
         return h
+
 
 def rho_bot_sites(tree_object, sites):
         temporary_network = []
@@ -823,6 +836,7 @@ def mean_two_point_correlator_i_ir(tree_object, operators, correct_magnetization
     if correct_magnetization:
         mean_correlation -= np.ones(mean_correlation.shape)*mean_magnetization
     return mean_correlation, mean_magnetization
+
 
 def optimize_network(tree_object, probe_length, var_error, max_iterations, printf = False, exact = False):
     variance_error = 10
