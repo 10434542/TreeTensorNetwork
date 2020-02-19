@@ -48,7 +48,7 @@ if __name__ == '__main__':
         cors, _ = tt.mean_two_point_correlator_i_ir(network1, network1.hamiltonian[0][0], False)
         print(cors)
         print(network1.times)
-        
+
         # it seems plt.show() is not working in this docker. solution:
         # https://stackoverflow.com/questions/46018102/how-can-i-use-matplotlib-pyplot-in-a-docker-container
         # plt.matshow(cors)

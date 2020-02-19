@@ -3,6 +3,14 @@ import numpy as np
 import torch
 # import torch_hamiltonians as ham
 
+def run_simulation(*args,**kwargs):
+    temp_network = TreeTensorNetwork(**kwargs)
+    tt.optimize_network(temp_network, *args[:-2], printf=True)
+    tt.store_network(temp_network, *args[-2:])
+    if temp_network.backend == 'torch':
+        torch.cuda.empty_cache()
+    return
+
 class Node:
     """Base Node class for TreeTensorNetwork.
        ------------------------------------------------------------------------
