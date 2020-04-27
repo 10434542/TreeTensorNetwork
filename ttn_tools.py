@@ -664,6 +664,9 @@ def exact_energy(N, hamiltonian, dimension):
 
 def rho_bot_sites(tree_object, sites):
         temporary_network = []
+        site_legs = np.arange(1,len(sites)*2+1)*-1
+        site_bra_legs = site_legs[:int(site_legs.size/2)].astype(int).tolist()
+        site_ket_legs = site_legs[int(site_legs.size/2):].astype(int).tolist()
         for tensor in tree_object.node_list:
             for site in sites:
                 if site in tensor.lattice:
@@ -735,15 +738,30 @@ def rho_bot_sites(tree_object, sites):
 
                 # if current_node = bottem tensor
                 elif not current_node.left in unique_network and not current_node.right in unique_network:
-                    for site in sites:
+                    # below is from new_methods
+                    for site, new_bra_leg, new_ket_leg in zip(sites, site_bra_legs, site_ket_legs):
+                        # added flatten() like in old code:
                         if site in current_node.lattice.flatten():
+                            # print(np.where(current_tensor.lattice==site)[0])
                             index_to_mask = np.where(current_node.lattice.flatten() == site)[0]+1
-                            current_node.bralegs[index_to_mask] = new_bra_open_legs.pop()
-                            current_node.ketlegs[index_to_mask] = new_ket_open_legs.pop()
-                    legs_to_mask = np.where(current_node.bralegs == None)[0]
-                    new_closed_legs = np.arange(max_leg+1, legs_to_mask.size+max_leg+1)
-                    current_node.bralegs[legs_to_mask], current_node.ketlegs[legs_to_mask] = new_closed_legs, new_closed_legs
-                    max_leg = np.max(np.array([current_node.ketlegs, np.array(current_node.bralegs)]))
+                            current_node.bralegs[index_to_mask] = new_bra_leg
+                            current_node.ketlegs[index_to_mask] = new_ket_leg
+
+                    for i_leg, b_leg in enumerate(current_node.ketlegs):
+                        if b_leg is None:
+                            current_node.ketlegs[i_leg] = max_leg+1
+                            current_node.bralegs[i_leg] = max_leg+1
+                            max_leg+=1
+                    # below is old code
+                    # for site in sites:
+                    #     if site in current_node.lattice.flatten():
+                    #         index_to_mask = np.where(current_node.lattice.flatten() == site)[0]+1
+                    #         current_node.bralegs[index_to_mask] = new_bra_open_legs.pop()
+                    #         current_node.ketlegs[index_to_mask] = new_ket_open_legs.pop()
+                    # legs_to_mask = np.where(current_node.bralegs == None)[0]
+                    # new_closed_legs = np.arange(max_leg+1, legs_to_mask.size+max_leg+1)
+                    # current_node.bralegs[legs_to_mask], current_node.ketlegs[legs_to_mask] = new_closed_legs, new_closed_legs
+                    # max_leg = np.max(np.array([current_node.ketlegs, np.array(current_node.bralegs)]))
             all_legs.extend((current_node.bralegs, current_node.ketlegs))
         reduced_density_matrix_list = []
         order_legs = [i for i in range(1, max_leg+1)][::-1]
@@ -771,6 +789,266 @@ def rho_bot_sites(tree_object, sites):
         reduced_density_matrix = og_reduced_density_matrix.reshape(new_shape, new_shape)
         return og_reduced_density_matrix, reduced_density_matrix
 
+# new
+################################################################################
+def dimer_dimer_correlator(tree_object, operators, direction):
+    print(tree_object.root.lattice.reshape(4,4))
+    reshaped_lattice = tree_object.root.lattice.reshape(tree_object.square_size,tree_object.square_size)
+    shapes = reshaped_lattice.shape
+    # x direction
+    half_l_x = int(shapes[0]/2)
+    half_l_y = int(shapes[1]/2)
+    all_dimer_dimer_correlation_value = []
+    all_two_point_correlation_value_0 = []
+    all_two_point_correlation_value_1 = []
+    all_operators_list = vector_correlator(tree_object, operators, 2)
+    if (direction == 'x') or (direction == 'X'):
+        for i in range(shapes[0]):
+            for j in range(shapes[1]):
+                dimer_x_sites_0 =  [reshaped_lattice[i,j], reshaped_lattice[i,(j+1)%shapes[1]]]
+                dimer_x_sites_1 =  [reshaped_lattice[i, (j+half_l_x)%shapes[0]], reshaped_lattice[i, (j+half_l_x+1)%shapes[0]]]
+                temp_sites = [*dimer_x_sites_0, *dimer_x_sites_1]
+                temp_dimer_correlation_value = []
+                temp_two_point_correlation_value_0 = []
+                temp_two_point_correlation_value_1 = []
+
+                for k in all_operators_list:
+                    temp_dimer_correlation_value.append(four_point_correlator(tree_object, temp_sites, k))
+                all_dimer_dimer_correlation_value.append(np.sum(temp_dimer_correlation_value))
+
+                for k in operators:
+                    temp_two_point_correlation_value_0.append(two_point_correlator(tree_object, dimer_x_sites_0, k))
+                    temp_two_point_correlation_value_1.append(two_point_correlator(tree_object, dimer_x_sites_1, k))
+                all_two_point_correlation_value_0.append(np.sum(temp_two_point_correlation_value_0))
+                all_two_point_correlation_value_1.append(np.sum(temp_two_point_correlation_value_1))
+
+    elif (direction == 'y') or (direction == 'Y'):
+        for i in range(shapes[0]):
+            for j in range(shapes[1]):
+                dimer_y_sites_0 = [reshaped_lattice[i, j] , reshaped_lattice[(i+1)%shapes[0],j]]
+                dimer_y_sites_1 = [reshaped_lattice[(i+half_l_y)%shapes[1],j], reshaped_lattice[(i+1+half_l_y)%shapes[1], j]]
+                temp_sites = [*dimer_y_sites_0, *dimer_y_sites_1]
+                temp_dimer_correlation_value = []
+                temp_two_point_correlation_value_0 = []
+                temp_two_point_correlation_value_1 = []
+
+                for k in all_operators_list:
+                    temp_dimer_correlation_value.append(four_point_correlator(tree_object, temp_sites, k))
+                all_dimer_dimer_correlation_value.append(np.sum(temp_dimer_correlation_value))
+
+                for k in operators:
+                    temp_two_point_correlation_value_0.append(two_point_correlator(tree_object, dimer_y_sites_0, k))
+                    temp_two_point_correlation_value_1.append(two_point_correlator(tree_object, dimer_y_sites_1, k))
+                all_two_point_correlation_value_0.append(np.sum(temp_two_point_correlation_value_0))
+                all_two_point_correlation_value_1.append(np.sum(temp_two_point_correlation_value_1))
+
+    return np.mean(all_dimer_dimer_correlation_value)/2, all_dimer_dimer_correlation_value, np.mean(all_two_point_correlation_value_0), np.mean(all_two_point_correlation_value_1)
+
+
+def vector_correlator(tree_object, operators, power):
+    """ supplementary function for plaquette AND dimer correlators """
+    all_products = compute_correlation_product(operators, power=power)
+    operators_total_list = []
+    for i in all_products:
+        temp_operators_list = [operator for sub_operators in i for operator in sub_operators]
+        operators_total_list.append(temp_operators_list)
+
+    return operators_total_list
+
+
+def plaquette_correlator(tree_object, operators, sites):
+    """ single plaquette expectation value """
+    all_operators_4 = vector_correlator(tree_object, operators, 2)
+    all_operators_2 = vector_correlator(tree_object, operators, 1)
+
+    plaquettes = []
+    alpha, beta, gamma, delta = sites
+    orders4 = [[alpha, beta, gamma, delta],[alpha, delta, beta, gamma], [alpha, gamma, beta, delta]]
+    signs4 = [2,2,-2]
+    orders2 = [[alpha, beta], [gamma, delta], [alpha, delta], [beta, gamma], [alpha, gamma], [beta, delta]]
+    for operator in all_operators_4:
+        for order, sign in zip(orders4, signs4):
+            plaquettes.append(sign*four_point_correlator(tree_object, order, operator))
+    for operator in all_operators_2:
+        for order in orders2:
+            plaquettes.append(.5*two_point_correlator(tree_object, order, operator))
+    return np.sum(plaquettes)
+
+
+def compute_correlation_product(operator_list, power):
+    return list(it.product(operator_list, repeat=int(power)))
+
+
+def plaquette_correlators(tree_object, start_operators):
+    """ new version, in use """
+    reshaped_lattice = tree_object.root.lattice
+    shapes = reshaped_lattice.shape
+    # x direction
+    half_l_x = int(shapes[0]/2)
+    half_l_y = int(shapes[1]/2)
+    all_plaquettes = []
+    for i in range(shapes[0]):
+        for j in range(shapes[1]):
+            a = reshaped_lattice[i, j]
+            b = reshaped_lattice[i, (j+1)%shapes[1]]
+            g = reshaped_lattice[(i+1)%shapes[0], (j+1)%shapes[1]]
+            d = reshaped_lattice[(i+1)%shapes[0], j]
+            temp_plaq = plaquette_correlator(tree_object, start_operators, [a, b, g, d]) + .125
+            all_plaquettes.append(temp_plaq)
+            # print(np.matrix([[alpha, beta],[delta, gamma]]))
+    return all_plaquettes
+
+
+def plaquette_plaquette_correlator(tree_object, operators):
+    all_operators_8 = vector_correlator(tree_object, operators, 4)
+    all_operators_6 = vector_correlator(tree_object, operators, 3)
+
+    all_operators_4 = vector_correlator(tree_object, operators, 2)
+    all_operators_2 = vector_correlator(tree_object, operators, 1)
+    reshaped_lattice = tree_object.root.lattice
+    shapes = reshaped_lattice.shape
+    # x direction
+    half_l_x = int(shapes[0]/2)
+    half_l_y = int(shapes[1]/2)
+    # x-direction
+    x_plaquettes = []
+    y_plaquettes = []
+    for i in range(shapes[0]):
+        for j in range(shapes[1]):
+            x_temp_plaquette, y_temp_plaquette = [], []
+            i_0 = reshaped_lattice[i, j]
+            j_0 = reshaped_lattice[i, (j+1)%shapes[1]]
+            k_0 = reshaped_lattice[(i+1)%shapes[0], (j+1)%shapes[1]]
+            l_0 = reshaped_lattice[(i+1)%shapes[0], j]
+            m_x = reshaped_lattice[i, (j+half_l_x)%shapes[0]]
+            n_x = reshaped_lattice[i, (j+half_l_x+1)%shapes[0]]
+            o_x = reshaped_lattice[(i+1)%shapes[1], (j+half_l_x+1)%shapes[0]]
+            p_x = reshaped_lattice[(i+1)%shapes[1], (j+half_l_x)%shapes[0]]
+            m_y = reshaped_lattice[(i+half_l_y)%shapes[1], j]
+            n_y = reshaped_lattice[(i+half_l_y)%shapes[1], (j+1)%shapes[0]]
+            o_y = reshaped_lattice[(i+half_l_y+1)%shapes[1], (j+1)%shapes[0]]
+            p_y = reshaped_lattice[(i+half_l_y+1)%shapes[1], j]
+            indices_8_x = [[i_0,j_0,k_0,l_0,m_x,n_x,o_x,p_x], [i_0,j_0,k_0,l_0,m_x,p_x,n_x,o_x], [i_0,j_0,k_0,l_0,m_x,o_x,n_x,p_x],
+                           [i_0,l_0,j_0,k_0,m_x,n_x,o_x,p_x], [i_0,l_0,j_0,k_0,m_x,p_x,n_x,o_x], [i_0,l_0,j_0,k_0,m_x,o_x,n_x,p_x],
+                           [i_0,k_0,j_0,l_0,m_x,n_x,o_x,p_x], [i_0,k_0,j_0,l_0,m_x,p_x,n_x,o_x], [i_0,k_0,j_0,l_0,m_x,o_x,n_x,p_x]]
+            indices_6_x = [[i_0,j_0,k_0,l_0,m_x,n_x], [i_0,j_0,k_0,l_0,o_x,p_x], [i_0,j_0,k_0,l_0,m_x,p_x], [i_0,j_0,k_0,l_0,n_x,o_x],
+                           [i_0,j_0,k_0,l_0,m_x,o_x], [i_0,j_0,k_0,l_0,n_x,p_x],
+                           [i_0,l_0,j_0,k_0,m_x,n_x], [i_0,l_0,j_0,k_0,o_x,p_x], [i_0,l_0,j_0,k_0,m_x,p_x], [i_0,l_0,j_0,k_0,n_x,o_x],
+                           [i_0,l_0,j_0,k_0,m_x,o_x], [i_0,l_0,j_0,k_0,n_x,p_x],
+                           [i_0,k_0,j_0,l_0,m_x,n_x], [i_0,k_0,j_0,l_0,o_x,p_x], [i_0,k_0,j_0,l_0,m_x,p_x], [i_0,k_0,j_0,l_0,n_x,o_x],
+                           [i_0,k_0,j_0,l_0,m_x,o_x], [i_0,k_0,j_0,l_0,n_x,p_x],
+                           [i_0,j_0,m_x,n_x,o_x,p_x], [i_0,j_0,m_x,p_x,n_x,o_x], [i_0,j_0,m_x,o_x,n_x,p_x],
+                           [k_0,l_0,m_x,n_x,o_x,p_x], [k_0,l_0,m_x,p_x,n_x,o_x], [k_0,l_0,m_x,o_x,n_x,p_x],
+                           [i_0,l_0,m_x,n_x,o_x,p_x], [i_0,l_0,m_x,p_x,n_x,o_x], [i_0,l_0,m_x,o_x,n_x,p_x],
+                           [j_0,k_0,m_x,n_x,o_x,p_x], [j_0,k_0,m_x,p_x,n_x,o_x], [j_0,k_0,m_x,o_x,n_x,p_x],
+                           [i_0,k_0,m_x,n_x,o_x,p_x], [i_0,k_0,m_x,p_x,n_x,o_x], [i_0,k_0,m_x,o_x,n_x,p_x],
+                           [j_0,l_0,m_x,n_x,o_x,p_x], [j_0,l_0,m_x,p_x,n_x,o_x], [j_0,l_0,m_x,o_x,n_x,p_x]]
+            indices_4_x = [[i_0,j_0,k_0,l_0], [i_0,l_0,j_0,k_0], [i_0,k_0,j_0,l_0], [m_x,n_x,o_x,p_x], [m_x,p_x,n_x,o_x], [m_x,o_x,n_x,p_x],
+                           [i_0,j_0,m_x,n_x], [i_0,j_0,n_x,o_x], [i_0,j_0,m_x,o_x], [i_0,j_0,n_x,p_x], [i_0,j_0,o_x,p_x], [i_0,j_0,m_x,p_x],
+                           [k_0,l_0,m_x,n_x], [k_0,l_0,n_x,o_x], [k_0,l_0,m_x,o_x], [k_0,l_0,n_x,p_x], [k_0,l_0,o_x,p_x], [k_0,l_0,m_x,p_x],
+                           [i_0,l_0,m_x,n_x], [i_0,l_0,n_x,o_x], [i_0,l_0,m_x,o_x], [i_0,l_0,n_x,p_x], [i_0,l_0,o_x,p_x], [i_0,l_0,m_x,p_x],
+                           [j_0,k_0,m_x,n_x], [j_0,k_0,n_x,o_x], [j_0,k_0,m_x,o_x], [j_0,k_0,n_x,p_x], [j_0,k_0,o_x,p_x], [j_0,k_0,m_x,p_x],
+                           [i_0,k_0,m_x,n_x], [i_0,k_0,n_x,o_x], [i_0,k_0,m_x,o_x], [i_0,k_0,n_x,p_x], [i_0,k_0,o_x,p_x], [i_0,k_0,m_x,p_x],
+                           [j_0,l_0,m_x,n_x], [j_0,l_0,n_x,o_x], [j_0,l_0,m_x,o_x], [j_0,l_0,n_x,p_x], [j_0,l_0,o_x,p_x], [j_0,l_0,m_x,p_x]]
+            indices_2_x = [[i_0,j_0], [k_0,l_0], [i_0,l_0], [j_0,k_0], [i_0,k_0], [j_0,l_0], [m_x,n_x], [o_x,p_x], [m_x,p_x], [n_x,o_x], [m_x,o_x], [n_x, p_x]]
+            indices_8_y = [[i_0,j_0,k_0,l_0,m_y,n_y,o_y,p_y], [i_0,j_0,k_0,l_0,m_y,p_y,n_y,o_y], [i_0,j_0,k_0,l_0,m_y,o_y,n_y,p_y],
+                           [i_0,l_0,j_0,k_0,m_y,n_y,o_y,p_y], [i_0,l_0,j_0,k_0,m_y,p_y,n_y,o_y], [i_0,l_0,j_0,k_0,m_y,o_y,n_y,p_y],
+                           [i_0,k_0,j_0,l_0,m_y,n_y,o_y,p_y], [i_0,k_0,j_0,l_0,m_y,p_y,n_y,o_y], [i_0,k_0,j_0,l_0,m_y,o_y,n_y,p_y]]
+            indices_6_y = [[i_0,j_0,k_0,l_0,m_y,n_y], [i_0,j_0,k_0,l_0,o_y,p_y], [i_0,j_0,k_0,l_0,m_y,p_y], [i_0,j_0,k_0,l_0,n_y,o_y],
+                           [i_0,j_0,k_0,l_0,m_y,o_y], [i_0,j_0,k_0,l_0,n_y,p_y],
+                           [i_0,l_0,j_0,k_0,m_y,n_y], [i_0,l_0,j_0,k_0,o_y,p_y], [i_0,l_0,j_0,k_0,m_y,p_y], [i_0,l_0,j_0,k_0,n_y,o_y],
+                           [i_0,l_0,j_0,k_0,m_y,o_y], [i_0,l_0,j_0,k_0,n_y,p_y],
+                           [i_0,k_0,j_0,l_0,m_y,n_y], [i_0,k_0,j_0,l_0,o_y,p_y], [i_0,k_0,j_0,l_0,m_y,p_y], [i_0,k_0,j_0,l_0,n_y,o_y],
+                           [i_0,k_0,j_0,l_0,m_y,o_y], [i_0,k_0,j_0,l_0,n_y,p_y],
+                           [i_0,j_0,m_y,n_y,o_y,p_y], [i_0,j_0,m_y,p_y,n_y,o_y], [i_0,j_0,m_y,o_y,n_y,p_y],
+                           [k_0,l_0,m_y,n_y,o_y,p_y], [k_0,l_0,m_y,p_y,n_y,o_y], [k_0,l_0,m_y,o_y,n_y,p_y],
+                           [i_0,l_0,m_y,n_y,o_y,p_y], [i_0,l_0,m_y,p_y,n_y,o_y], [i_0,l_0,m_y,o_y,n_y,p_y],
+                           [j_0,k_0,m_y,n_y,o_y,p_y], [j_0,k_0,m_y,p_y,n_y,o_y], [j_0,k_0,m_y,o_y,n_y,p_y],
+                           [i_0,k_0,m_y,n_y,o_y,p_y], [i_0,k_0,m_y,p_y,n_y,o_y], [i_0,k_0,m_y,o_y,n_y,p_y],
+                           [j_0,l_0,m_y,n_y,o_y,p_y], [j_0,l_0,m_y,p_y,n_y,o_y], [j_0,l_0,m_y,o_y,n_y,p_y]]
+            indices_4_y = [[i_0,j_0,k_0,l_0], [i_0,l_0,j_0,k_0], [i_0,k_0,j_0,l_0], [m_y,n_y,o_y,p_y], [m_y,p_y,n_y,o_y], [m_y,o_y,n_y,p_y],
+                           [i_0,j_0,m_y,n_y], [i_0,j_0,n_y,o_y], [i_0,j_0,m_y,o_y], [i_0,j_0,n_y,p_y], [i_0,j_0,o_y,p_y], [i_0,j_0,m_y,p_y],
+                           [k_0,l_0,m_y,n_y], [k_0,l_0,n_y,o_y], [k_0,l_0,m_y,o_y], [k_0,l_0,n_y,p_y], [k_0,l_0,o_y,p_y], [k_0,l_0,m_y,p_y],
+                           [i_0,l_0,m_y,n_y], [i_0,l_0,n_y,o_y], [i_0,l_0,m_y,o_y], [i_0,l_0,n_y,p_y], [i_0,l_0,o_y,p_y], [i_0,l_0,m_y,p_y],
+                           [j_0,k_0,m_y,n_y], [j_0,k_0,n_y,o_y], [j_0,k_0,m_y,o_y], [j_0,k_0,n_y,p_y], [j_0,k_0,o_y,p_y], [j_0,k_0,m_y,p_y],
+                           [i_0,k_0,m_y,n_y], [i_0,k_0,n_y,o_y], [i_0,k_0,m_y,o_y], [i_0,k_0,n_y,p_y], [i_0,k_0,o_y,p_y], [i_0,k_0,m_y,p_y],
+                           [j_0,l_0,m_y,n_y], [j_0,l_0,n_y,o_y], [j_0,l_0,m_y,o_y], [j_0,l_0,n_y,p_y], [j_0,l_0,o_y,p_y], [j_0,l_0,m_y,p_y]]
+            indices_2_y = [[i_0,j_0], [k_0,l_0], [i_0,l_0], [j_0,k_0], [i_0,k_0], [j_0,l_0], [m_y,n_y], [o_y,p_y], [m_y,p_y], [n_y,o_y], [m_y,o_y], [n_y, p_y]]
+            factors_8 = [4,4,-4,4,4,-4,-4,-4,4]
+            factors_6 = [1,1,1,1,1,1,1,1,1,1,1,1,-1,-1,-1,-1,-1,-1,1,1,-1,1,1,-1,1,1,-1,1,1,-1,1,1,-1,1,1,-1]
+            factors_4 = [.5,.5,-.5,.5,.5,-.5,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25,.25]
+            factors_2 = [.5,.5,.5,.5,.5,.5,.5,.5,.5,.5,.5,.5]
+
+            for k in all_operators_8:
+                for index_8_x, index_8_y, factor_8 in zip(indices_8_x, indices_8_y, factors_8):
+                    x_temp_plaquette.append(factor_8*eight_point_correlator(tree_object, index_8_x, k))
+                    y_temp_plaquette.append(factor_8*eight_point_correlator(tree_object, index_8_y, k))
+            for k in all_operators_6:
+                for index_6_x, index_6_y, factor_6 in zip(indices_6_x, indices_6_y, factors_6):
+                    x_temp_plaquette.append(factor_6*six_point_correlator(tree_object, index_6_x, k))
+                    y_temp_plaquette.append(factor_6*six_point_correlator(tree_object, index_6_y, k))
+            for k in all_operators_4:
+                for index_4_x, index_4_y, factor_4 in zip(indices_4_x, indices_4_y, factors_4):
+                    x_temp_plaquette.append(factor_4*four_point_correlator(tree_object, index_4_x, k))
+                    y_temp_plaquette.append(factor_4*four_point_correlator(tree_object, index_4_y, k))
+            for k in all_operators_2:
+                for index_2_x, index_2_y, factor_2 in zip(indices_2_x, indices_2_y, factors_2):
+                    x_temp_plaquette.append(factor_2*two_point_correlator(tree_object, index_2_x, k))
+                    y_temp_plaquette.append(factor_2*two_point_correlator(tree_object, index_2_y, k))
+
+            x_plaquettes.append(np.sum(x_temp_plaquette))
+            y_plaquettes.append(np.sum(y_temp_plaquette))
+
+    x_plaquettes.append(.125**2)
+    y_plaquettes.append(.125**2)
+    mean_squared_plaquette = np.mean(plaquette_correlators(tree_object, operators))**2
+
+    return np.mean(x_plaquettes), np.mean(y_plaquettes), x_plaquettes, y_plaquettes, mean_squared_plaquette
+
+
+def eight_point_correlator(tree_object, sites, operators):
+    """ Docstring for two_point_correlator """
+    to_contract = rho_bot_sites(tree_object, sites)[0]
+    if tree_object.backend == 'torch':
+        correlation_value = oe.contract(to_contract, [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], operators[0], [1,9],
+                                        operators[1], [2,10], operators[2], [3,11], operators[3], [4,12], operators[4],
+                                        [5,13], operators[5], [6,14], operators[6], [7,15], operators[7], [8,16]).item()
+    elif tree_object.backend == 'numpy':
+        correlation_value = oe.contract(to_contract, [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], operators[0], [1,9],
+                                        operators[1], [2,10], operators[2], [3,11], operators[3], [4,12], operators[4],
+                                        [5,13], operators[5], [6,14], operators[6], [7,15], operators[7], [8,16])
+
+    return correlation_value
+
+def six_point_correlator(tree_object, sites, operators):
+    """ Docstring for two_point_correlator """
+    to_contract = rho_bot_sites(tree_object, sites)[0]
+    # print('got here', to_contract)
+    if tree_object.backend == 'torch':
+        correlation_value = oe.contract(to_contract, [1,2,3,4,5,6,7,8,9,10,11,12], operators[0], [1,7],
+                                        operators[1], [2,8], operators[2], [3,9], operators[3], [4,10], operators[4],
+                                        [5,11], operators[5], [6,12]).item()
+    elif tree_object.backend == 'numpy':
+        correlation_value = oe.contract(to_contract, [1,2,3,4,5,6,7,8,9,10,11,12], operators[0], [1,7],
+                                        operators[1], [2,8], operators[2], [3,9], operators[3], [4,10], operators[4],
+                                        [5,11], operators[5], [6,12])
+    return correlation_value
+
+def four_point_correlator(tree_object, sites, operators):
+
+    """ Docstring for two_point_correlator """
+    to_contract = rho_bot_sites(tree_object, sites)[0]
+    if tree_object.backend == 'torch':
+
+        correlation_value = oe.contract(to_contract, [1,2,3,4,5,6,7,8], operators[0], [1,5],
+                                        operators[1], [2,6], operators[2], [3,7], operators[3], [4,8]).item()
+    elif tree_object.backend == 'numpy':
+        correlation_value = oe.contract(to_contract, [1,2,3,4,5,6,7,8], operators[0], [1,5],
+                                        operators[1], [2,6], operators[2], [3,7], operators[3], [4,8])
+
+    return correlation_value
+# end new
+################################################################################
 
 def two_point_correlator(tree_object, sites, operators):
     """ Docstring for two_point_correlator """
@@ -882,3 +1160,124 @@ def optimize_network(tree_object, probe_length, var_error, max_iterations, print
 
     print('converged up to variance of:%s at iteration %s'%(variance_error, counter))
     return
+
+
+# dump:
+# def get_reduced_density_matrix(tree_object, sites, test_function=False):
+#     temporary_network = []
+#     site_legs = np.arange(1,len(sites)*2+1)*-1
+#     site_bra_legs = site_legs[:int(site_legs.size/2)].astype(int).tolist()
+#     site_ket_legs = site_legs[int(site_legs.size/2):].astype(int).tolist()
+#     for tensor in tree_object.tensorlist:
+#         for site in sites:
+#             if site in tensor.lattice:
+#                 temporary_network.append(tensor)
+#
+#     unique_network = []
+#     for i in temporary_network:
+#         if i not in unique_network:
+#             unique_network.append(i)
+#         else:
+#             continue
+#
+#     new_open_legs = np.arange(1, 2*(len(sites))+1)*-1
+#     new_bra_open_legs, new_ket_open_legs = np.array_split(new_open_legs, 2)
+#     new_bra_open_legs, new_ket_open_legs = list(reversed(new_bra_open_legs.tolist())), list(reversed(new_ket_open_legs.tolist()))
+#     all_legs = []
+#
+#     for current_tensor in unique_network:
+#         if current_tensor.isRoot():
+#
+#             current_tensor.bralegs = np.array([1,2,3])
+#             current_tensor.ketlegs = np.array([1, None, None])
+#
+#             if current_tensor.left in unique_network and not current_tensor.right in unique_network:
+#                 current_tensor.ketlegs[2] = current_tensor.bralegs[2]
+#             elif current_tensor.right in unique_network and not current_tensor.left in unique_network:
+#                 current_tensor.ketlegs[1] = current_tensor.bralegs[1]
+#
+#             mask_legs = np.where(current_tensor.ketlegs == None)[0]
+#             new_values = np.arange(np.max(current_tensor.bralegs)+1,
+#                 np.max(current_tensor.bralegs)+mask_legs.size+1)
+#             current_tensor.ketlegs[mask_legs] = new_values
+#             max_leg = np.max(np.array([np.max(current_tensor.ketlegs), np.max(current_tensor.bralegs)]))
+#
+#         if not current_tensor.isRoot():
+#             current_tensor.bralegs = [None]*len(current_tensor.cur_tensor.shape)
+#             current_tensor.ketlegs = [None]*len(current_tensor.cur_tensor.shape)
+#             current_tensor.bralegs, current_tensor.ketlegs = np.array(current_tensor.bralegs), np.array(current_tensor.ketlegs)
+#
+#             if current_tensor.isLeftChild():
+#                 current_tensor.bralegs[0] = current_tensor.parent.bralegs[1]
+#                 current_tensor.ketlegs[0] = current_tensor.parent.ketlegs[1]
+#
+#             if current_tensor.isRightChild():
+#                 current_tensor.bralegs[0] = current_tensor.parent.bralegs[2]
+#                 current_tensor.ketlegs[0] = current_tensor.parent.ketlegs[2]
+#
+#             if current_tensor.layer != tree_object.cut:
+#                 mask_legs = np.where(current_tensor.bralegs == None)[0]
+#                 new_bralegs = np.arange(max_leg+1, max_leg+mask_legs.size+1)
+#                 current_tensor.bralegs[mask_legs] = new_bralegs
+#                 max_leg = np.max(current_tensor.bralegs)
+#
+#             # for lower legs
+#             if current_tensor.left in unique_network and current_tensor.right in unique_network:
+#                 mask_legs = np.where(current_tensor.ketlegs == None)[0]
+#                 current_tensor.ketlegs[mask_legs] = np.arange(max_leg+1, max_leg+mask_legs.size+1)
+#                 max_leg = np.max(current_tensor.ketlegs)
+#
+#             elif current_tensor.left in unique_network and not current_tensor.right in unique_network:
+#                 current_tensor.ketlegs[2] = current_tensor.bralegs[2]
+#                 current_tensor.ketlegs[1] = max_leg+1
+#                 max_leg = np.max(current_tensor.ketlegs)
+#
+#             elif current_tensor.right in unique_network and not current_tensor.left in unique_network:
+#                 current_tensor.ketlegs[1] = current_tensor.bralegs[1]
+#                 current_tensor.ketlegs[2] = max_leg+1
+#                 max_leg = np.max(current_tensor.ketlegs)
+#
+#             # if current_tensor = bottem tensor
+#             elif not current_tensor.left in unique_network and not current_tensor.right in unique_network:
+#                 for site, new_bra_leg, new_ket_leg in zip(sites, site_bra_legs, site_ket_legs):
+#
+#                     if site in current_tensor.lattice:
+#                         # print(np.where(current_tensor.lattice==site)[0])
+#                         index_to_mask = np.where(current_tensor.lattice == site)[0]+1
+#                         current_tensor.bralegs[index_to_mask] = new_bra_leg
+#                         current_tensor.ketlegs[index_to_mask] = new_ket_leg
+#
+#                 for i_leg, b_leg in enumerate(current_tensor.ketlegs):
+#                     if b_leg is None:
+#                         current_tensor.ketlegs[i_leg] = max_leg+1
+#                         current_tensor.bralegs[i_leg] = max_leg+1
+#                         max_leg+=1
+#         all_legs.extend((current_tensor.bralegs, current_tensor.ketlegs))
+#
+#     if test_function is True:
+#         for k in unique_network:
+#             print(k.value, k.bralegs, k.ketlegs, k.lattice)
+#
+#     reduced_density_matrix_list = []
+#     # order_legs = [i for i in range(1, max_leg+1)][::-1]
+#     for i in unique_network:
+#         reduced_density_matrix_list.extend((i,i))
+#     new_shape = 2**int(new_open_legs.size/2)
+#     #
+#     all_legs_2 = [np.copy(l) for l in all_legs]
+#     tensor_list = []
+#     f = [l.tolist() for l in all_legs_2]
+#     k = [m for n in f for m in n]
+#     out = np.arange(0, np.abs(np.min(k)))[::-1]
+#     # print(out)
+#     for s2 in all_legs_2:
+#         s2+= np.abs(np.min(k))
+#     #
+#     new_path = []
+#     for m,n in zip(reduced_density_matrix_list, all_legs_2):
+#         new_path.append(m.cur_tensor)
+#         new_path.append(n)
+#
+#     og_reduced_density_matrix = oe.contract(*new_path, out, optimize='greedy')
+#     reduced_density_matrix = og_reduced_density_matrix.reshape(new_shape, new_shape)
+#     return og_reduced_density_matrix, reduced_density_matrix
