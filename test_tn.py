@@ -7,6 +7,7 @@ import pickle
 import os
 from torch_hamiltonians import heisenberg_nn_id_float32 as heisham
 from ttn import TreeTensorNetwork, Node
+import gc
 
 sxi = torch.tensor([0])
 szi = np.array([[1., 0], [0, -1.]])
@@ -35,25 +36,40 @@ def transfer_tree_object(folder_to_foo, folder_to_store):
 if __name__ == '__main__':
     # test_net = TreeTensorNetwork(system_size=16,
     #     cut=2, chilist=[10,10], hamiltonian=simple_ham(1.),dimension=2)
-    load_network = True
+    folder_type = 'ttn_plaquettes_x'
+    load_network = False
     if load_network is True:
-        for i in os.listdir('new_networks/2D_64_heis_v3'):
-            with open('new_networks/2D_64_heis_v3/'+i, 'rb') as d3:
-                print('working on ', i)
-                temp_ttn_2 = pickle.load(d3)
-                operators_to_use = [temp_ttn_2.hamiltonian[0][0], temp_ttn_2.hamiltonian[1][0],
-                                   temp_ttn_2.hamiltonian[2][0]]
-                temp_dict = {}
-                if not os.path.exists('ttn_dicts'):
-                    os.mkdir('ttn_dicts')
-                if not os.path.exists('ttn_dicts/2D_64_heis_v3'):
-                    os.mkdir('ttn_dicts/2D_64_heis_v3')
-                temp_dict['single_plaquettes'] = tt.plaquette_correlators(temp_ttn_2, operators_to_use)
-                with open('ttn_dicts/2D_64_heis_v3/'+temp_ttn_2.file_name, 'wb') as d4:
-                    pickle.dump(temp_dict, d4)
-                print('done with ', i)
-                torch.cuda.empty_cache()
-    transfer = False
+        # for i in os.listdir('new_networks/2D_64_heis_v3'):
+        with open('new_networks/2D_64_heis_v3/'+'N64_chi100-100-100_seedNone_order0.250.250.50.50.50.50.00.00.00.00.00.0-1.0.pickle', 'rb') as d3:
+            # print('working on ', i)
+            temp_ttn_2 = pickle.load(d3)
+            print(torch.cuda.max_memory_allocated()/(8*1024**2))
+            for i in temp_ttn_2.node_list:
+                del i.cache_tensor
+            torch.cuda.empty_cache()
+
+            for obj in gc.get_objects():
+                try:
+                    if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                        print(type(obj), obj.size())
+                except:
+                    pass
+            # print(torch.cuda.max_memory_allocated()/(8*1024**2))
+            #
+            # operators_to_use = [temp_ttn_2.hamiltonian[0][0], temp_ttn_2.hamiltonian[1][0],
+            #                    temp_ttn_2.hamiltonian[2][0]]
+            # temp_dict = {}
+            # if not os.path.exists(folder_type):
+            #     os.mkdir(folder_type)
+            # if not os.path.exists(folder_type+'/2D_64_heis_v3'):
+            #     os.mkdir(folder_type+'/2D_64_heis_v3')
+            # temp_dict['plaquettes_x'] = tt.plaquette_plaquette_correlator(temp_ttn_2, operators_to_use)
+            # with open(folder_type+'/2D_64_heis_v3/'+temp_ttn_2.file_name, 'wb') as d4:
+            #     pickle.dump(temp_dict, d4)
+            # print('done with ', i)
+            # torch.cuda.empty_cache()
+
+    transfer = True
     if transfer is True:
         # print(tt.rho_bot_sites(test_net, [1,4,5]))
         if not os.path.exists('new_networks'):
@@ -68,15 +84,19 @@ if __name__ == '__main__':
                 new_tensors = temp['numpy_tensors']
                 temp_ttn = TreeTensorNetwork(system_size=64, cut=3, chilist=[100,100,100],
                            hamiltonian=heisham(j2=temp['j2_used']))
+                t1 = torch.cuda.FloatTensor(new_tensors[0])
+                t2 = torch.cuda.FloatTensor(new_tensors[1])
+                t3 = torch.cuda.FloatTensor(new_tensors[2])
+                t4 = torch.cuda.FloatTensor(new_tensors[3])
                 for j in temp_ttn.node_list:
                     if j.layer == 0:
-                        j.current_tensor = torch.cuda.FloatTensor(new_tensors[0])
+                        j.current_tensor = t1
                     if j.layer == 1:
-                        j.current_tensor = torch.cuda.FloatTensor(new_tensors[1])
+                        j.current_tensor = t2
                     if j.layer == 2:
-                        j.current_tensor = torch.cuda.FloatTensor(new_tensors[2])
+                        j.current_tensor = t3
                     if j.layer == 3:
-                        j.current_tensor = torch.cuda.FloatTensor(new_tensors[3])
+                        j.current_tensor = t4
                 new_location = 'new_networks/2D_64_heis_v3/'
                 with open(new_location+temp_ttn.file_name+'.pickle', 'wb') as d2:
                     pickle.dump(temp_ttn, d2)

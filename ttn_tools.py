@@ -785,15 +785,14 @@ def rho_bot_sites(tree_object, sites):
             new_path.append(m.current_tensor)
             new_path.append(n)
 
-        og_reduced_density_matrix = oe.contract(*new_path, out, optimize='greedy')
-        reduced_density_matrix = og_reduced_density_matrix.reshape(new_shape, new_shape)
-        return og_reduced_density_matrix, reduced_density_matrix
+        # og_reduced_density_matrix = oe.contract(*new_path, out, optimize='greedy').item()
+        # reduced_density_matrix = og_reduced_density_matrix.reshape(new_shape, new_shape)
+        return oe.contract(*new_path, out, backend='torch', optimize='greedy'), None
 
 # new
 ################################################################################
 def dimer_dimer_correlator(tree_object, operators, direction):
-    print(tree_object.root.lattice.reshape(4,4))
-    reshaped_lattice = tree_object.root.lattice.reshape(tree_object.square_size,tree_object.square_size)
+    reshaped_lattice = tree_object.root.lattice
     shapes = reshaped_lattice.shape
     # x direction
     half_l_x = int(shapes[0]/2)
@@ -913,8 +912,9 @@ def plaquette_plaquette_correlator(tree_object, operators):
     # x-direction
     x_plaquettes = []
     y_plaquettes = []
-    for i in range(shapes[0]):
+    for i in range(1,shapes[0]):
         for j in range(shapes[1]):
+            print('working on %s-%s'%(i,j))
             x_temp_plaquette, y_temp_plaquette = [], []
             i_0 = reshaped_lattice[i, j]
             j_0 = reshaped_lattice[i, (j+1)%shapes[1]]
@@ -982,43 +982,49 @@ def plaquette_plaquette_correlator(tree_object, operators):
             for k in all_operators_8:
                 for index_8_x, index_8_y, factor_8 in zip(indices_8_x, indices_8_y, factors_8):
                     x_temp_plaquette.append(factor_8*eight_point_correlator(tree_object, index_8_x, k))
-                    y_temp_plaquette.append(factor_8*eight_point_correlator(tree_object, index_8_y, k))
+                    torch.cuda.empty_cache()
+                    print('working on', index_8_x)
+                    # y_temp_plaquette.append(factor_8*eight_point_correlator(tree_object, index_8_y, k))
+                    # torch.cuda.empty_cache()
             for k in all_operators_6:
                 for index_6_x, index_6_y, factor_6 in zip(indices_6_x, indices_6_y, factors_6):
                     x_temp_plaquette.append(factor_6*six_point_correlator(tree_object, index_6_x, k))
-                    y_temp_plaquette.append(factor_6*six_point_correlator(tree_object, index_6_y, k))
+                    # y_temp_plaquette.append(factor_6*six_point_correlator(tree_object, index_6_y, k))
+                    torch.cuda.empty_cache()
             for k in all_operators_4:
                 for index_4_x, index_4_y, factor_4 in zip(indices_4_x, indices_4_y, factors_4):
                     x_temp_plaquette.append(factor_4*four_point_correlator(tree_object, index_4_x, k))
-                    y_temp_plaquette.append(factor_4*four_point_correlator(tree_object, index_4_y, k))
+                    # y_temp_plaquette.append(factor_4*four_point_correlator(tree_object, index_4_y, k))
+                    torch.cuda.empty_cache()
             for k in all_operators_2:
                 for index_2_x, index_2_y, factor_2 in zip(indices_2_x, indices_2_y, factors_2):
                     x_temp_plaquette.append(factor_2*two_point_correlator(tree_object, index_2_x, k))
-                    y_temp_plaquette.append(factor_2*two_point_correlator(tree_object, index_2_y, k))
+                    # y_temp_plaquette.append(factor_2*two_point_correlator(tree_object, index_2_y, k))
+                    torch.cuda.empty_cache()
 
             x_plaquettes.append(np.sum(x_temp_plaquette))
-            y_plaquettes.append(np.sum(y_temp_plaquette))
-
+            # y_plaquettes.append(np.sum(y_temp_plaquette))
+            torch.cuda.empty_cache()
+        torch.cuda.empty_cache()
     x_plaquettes.append(.125**2)
-    y_plaquettes.append(.125**2)
+    # y_plaquettes.append(.125**2)
     mean_squared_plaquette = np.mean(plaquette_correlators(tree_object, operators))**2
 
-    return np.mean(x_plaquettes), np.mean(y_plaquettes), x_plaquettes, y_plaquettes, mean_squared_plaquette
+    # commented out y_plaquettes  np.mean(y_plaquettes), y_plaquettes,
+    return np.mean(x_plaquettes), x_plaquettes, mean_squared_plaquette
 
 
 def eight_point_correlator(tree_object, sites, operators):
     """ Docstring for two_point_correlator """
-    to_contract = rho_bot_sites(tree_object, sites)[0]
     if tree_object.backend == 'torch':
-        correlation_value = oe.contract(to_contract, [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], operators[0], [1,9],
+        return oe.contract(rho_bot_sites(tree_object, sites)[0], [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], operators[0], [1,9],
                                         operators[1], [2,10], operators[2], [3,11], operators[3], [4,12], operators[4],
                                         [5,13], operators[5], [6,14], operators[6], [7,15], operators[7], [8,16]).item()
     elif tree_object.backend == 'numpy':
-        correlation_value = oe.contract(to_contract, [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], operators[0], [1,9],
+        return oe.contract(rho_bot_sites(tree_object, sites)[0], [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], operators[0], [1,9],
                                         operators[1], [2,10], operators[2], [3,11], operators[3], [4,12], operators[4],
                                         [5,13], operators[5], [6,14], operators[6], [7,15], operators[7], [8,16])
 
-    return correlation_value
 
 def six_point_correlator(tree_object, sites, operators):
     """ Docstring for two_point_correlator """
@@ -1040,10 +1046,10 @@ def four_point_correlator(tree_object, sites, operators):
     to_contract = rho_bot_sites(tree_object, sites)[0]
     if tree_object.backend == 'torch':
 
-        correlation_value = oe.contract(to_contract, [1,2,3,4,5,6,7,8], operators[0], [1,5],
+        return oe.contract(to_contract, [1,2,3,4,5,6,7,8], operators[0], [1,5],
                                         operators[1], [2,6], operators[2], [3,7], operators[3], [4,8]).item()
     elif tree_object.backend == 'numpy':
-        correlation_value = oe.contract(to_contract, [1,2,3,4,5,6,7,8], operators[0], [1,5],
+        return oe.contract(to_contract, [1,2,3,4,5,6,7,8], operators[0], [1,5],
                                         operators[1], [2,6], operators[2], [3,7], operators[3], [4,8])
 
     return correlation_value
