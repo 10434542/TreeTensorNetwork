@@ -36,6 +36,12 @@ def transfer_tree_object(folder_to_foo, folder_to_store):
 if __name__ == '__main__':
     # test_net = TreeTensorNetwork(system_size=16,
     #     cut=2, chilist=[10,10], hamiltonian=simple_ham(1.),dimension=2)
+    # for obj in gc.get_objects():
+    #     try:
+    #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+    #             print(type(obj), obj.size())
+    #     except:
+    #         pass
     folder_type = 'ttn_plaquettes_x'
     load_network = False
     if load_network is True:
@@ -69,7 +75,17 @@ if __name__ == '__main__':
             # print('done with ', i)
             # torch.cuda.empty_cache()
 
-    transfer = True
+    # with open('new_networks/2D_64_heis_v3/'+'N64_chi100-100-100_seedNone_order0.250.250.50.50.50.50.00.00.00.00.00.0-1.0.pickle', 'rb') as dt:
+    #     # print('working on ', i)
+    #     temp_ttn_2 = pickle.load(dt)
+    #     for obj in gc.get_objects():
+    #         try:
+    #             if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+    #                 print(type(obj), obj.size())
+    #         except:
+    #             pass
+
+    transfer = False
     if transfer is True:
         # print(tt.rho_bot_sites(test_net, [1,4,5]))
         if not os.path.exists('new_networks'):
@@ -91,13 +107,47 @@ if __name__ == '__main__':
                 for j in temp_ttn.node_list:
                     if j.layer == 0:
                         j.current_tensor = t1
+                        j.cache_tensor = None
                     if j.layer == 1:
                         j.current_tensor = t2
+                        j.cache_tensor = None
                     if j.layer == 2:
                         j.current_tensor = t3
+                        j.cache_tensor = None
                     if j.layer == 3:
                         j.current_tensor = t4
+                        j.cache_tensor = None
+                torch.cuda.empty_cache()
+                # does this increase ram usage? YES IT DOES, commented out for now
+                # for j in temp_ttn.node_list:
+                #     if j.layer == 0:
+                #         j.current_tensor = torch.cuda.FloatTensor(new_tensors[0])
+                #     if j.layer == 1:
+                #         j.current_tensor = torch.cuda.FloatTensor(new_tensors[1])
+                #     if j.layer == 2:
+                #         j.current_tensor = torch.cuda.FloatTensor(new_tensors[2])
+                #     if j.layer == 3:
+                #         j.current_tensor = torch.cuda.FloatTensor(new_tensors[3])
+                # for obj in gc.get_objects():
+                #     try:
+                #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                #             print(type(obj), obj.size())
+                #     except:
+                #         pass
                 new_location = 'new_networks/2D_64_heis_v3/'
                 with open(new_location+temp_ttn.file_name+'.pickle', 'wb') as d2:
                     pickle.dump(temp_ttn, d2)
                     print('Network stored in %s as %s'%(new_location, temp_ttn.file_name+'.pickle'))
+                torch.cuda.empty_cache()
+    # torch.cuda.empty_cache()
+    with open('new_networks/2D_64_heis_v3/'+'N64_chi100-100-100_seedNone_order0.250.250.50.50.50.50.00.00.00.00.00.0-1.0.pickle', 'rb') as dt:
+        # print('working on ', i)
+        temp_ttn_2 = pickle.load(dt)
+        for j in temp_ttn_2.node_list:
+            print(j.value)
+        for obj in gc.get_objects():
+            try:
+                if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                    print(type(obj), obj.size())
+            except:
+                pass
