@@ -35,7 +35,7 @@ def transfer_tree_object(folder_to_foo, folder_to_store):
 
 if __name__ == '__main__':
 
-    torch.backends.cudnn.benchmark=True
+    # torch.backends.cudnn.benchmark=True
     folder_type = 'ttn_plaquettes_x'
     load_network = True
     if load_network is True:
@@ -58,10 +58,11 @@ if __name__ == '__main__':
             # print(torch.__version__)
             # the print expressions below behave identical up to float32 precision
             print(tt.rho_bot_sites(temp_ttn_2,[9, 10, 18, 17, 13, 14], operators=operators_to_use2)[0].item())
-            print(tt.six_point_correlator(temp_ttn_2,[9, 10, 18, 17, 13, 14], operators=operators_to_use2))
-
+            # print(tt.six_point_correlator(temp_ttn_2,[9, 10, 18, 17, 13, 14], operators=operators_to_use2))
+            print(tt.n_point_correlator(temp_ttn_2, [temp_ttn_2.hamiltonian[0][0][0],temp_ttn_2.hamiltonian[0][0][0]], [1,2]))
+            # print(tt.two_point_correlator(temp_ttn_2, [1,2], [temp_ttn_2.hamiltonian[0][0][0],temp_ttn_2.hamiltonian[0][0][0]]))
             # print(tt.rho_bot_sites(temp_ttn_2,[9, 10, 18, 17, 13, 14, 22, 21])[0])
-
+            print(tt.mean_two_point_correlator_i_ir(temp_ttn_2, [temp_ttn_2.hamiltonian[0][0][0],temp_ttn_2.hamiltonian[0][0][0]], False))
             # print(torch.cuda.memory_allocated()*(10**(-9)))
             # for obj in gc.get_objects():
             #     try:

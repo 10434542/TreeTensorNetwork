@@ -414,7 +414,7 @@ def get_optimal_order(node, dict_of_networks, optimize_type):
     dict_of_networks['einsum_energy_indices'] = copied_energy_legs
     dict_of_networks['einsum_path_energy'] = new_opt_path_energy[0]
 
-# add environment or energy kwarg
+
 def contract_network(operators, network, contract_type='env'):
     temp_operators = [i for i in operators[0]]
     path = []
@@ -442,7 +442,7 @@ def contract_network(operators, network, contract_type='env'):
         # print(oe.contract(*path, optimize=network['einsum_path_energy']))
         return oe.contract(*path, optimize=network['einsum_path_energy'])
 
-# no bug here
+
 def get_energy(tree_object, node):
     """ Docstring for get_energy() """
     temp = 0
@@ -797,60 +797,6 @@ def rho_bot_sites(tree_object, sites, operators=None):
     torch.cuda.empty_cache()
     return oe.contract(*new_path, out), None
 
-# new
-################################################################################
-def dimer_dimer_correlator(tree_object, operators, direction):
-    reshaped_lattice = tree_object.root.lattice
-    shapes = reshaped_lattice.shape
-    # x direction
-    half_l_x = int(shapes[0]/2)
-    half_l_y = int(shapes[1]/2)
-    all_dimer_dimer_correlation_value = []
-    all_two_point_correlation_value_0 = []
-    all_two_point_correlation_value_1 = []
-    all_operators_list = vector_correlator(tree_object, operators, 2)
-    if (direction == 'x') or (direction == 'X'):
-        for i in range(shapes[0]):
-            for j in range(shapes[1]):
-                dimer_x_sites_0 =  [reshaped_lattice[i,j], reshaped_lattice[i,(j+1)%shapes[1]]]
-                dimer_x_sites_1 =  [reshaped_lattice[i, (j+half_l_x)%shapes[0]], reshaped_lattice[i, (j+half_l_x+1)%shapes[0]]]
-                temp_sites = [*dimer_x_sites_0, *dimer_x_sites_1]
-                temp_dimer_correlation_value = []
-                temp_two_point_correlation_value_0 = []
-                temp_two_point_correlation_value_1 = []
-
-                for k in all_operators_list:
-                    temp_dimer_correlation_value.append(four_point_correlator(tree_object, temp_sites, k))
-                all_dimer_dimer_correlation_value.append(np.sum(temp_dimer_correlation_value))
-
-                for k in operators:
-                    temp_two_point_correlation_value_0.append(two_point_correlator(tree_object, dimer_x_sites_0, k))
-                    temp_two_point_correlation_value_1.append(two_point_correlator(tree_object, dimer_x_sites_1, k))
-                all_two_point_correlation_value_0.append(np.sum(temp_two_point_correlation_value_0))
-                all_two_point_correlation_value_1.append(np.sum(temp_two_point_correlation_value_1))
-
-    elif (direction == 'y') or (direction == 'Y'):
-        for i in range(shapes[0]):
-            for j in range(shapes[1]):
-                dimer_y_sites_0 = [reshaped_lattice[i, j] , reshaped_lattice[(i+1)%shapes[0],j]]
-                dimer_y_sites_1 = [reshaped_lattice[(i+half_l_y)%shapes[1],j], reshaped_lattice[(i+1+half_l_y)%shapes[1], j]]
-                temp_sites = [*dimer_y_sites_0, *dimer_y_sites_1]
-                temp_dimer_correlation_value = []
-                temp_two_point_correlation_value_0 = []
-                temp_two_point_correlation_value_1 = []
-
-                for k in all_operators_list:
-                    temp_dimer_correlation_value.append(four_point_correlator(tree_object, temp_sites, k))
-                all_dimer_dimer_correlation_value.append(np.sum(temp_dimer_correlation_value))
-
-                for k in operators:
-                    temp_two_point_correlation_value_0.append(two_point_correlator(tree_object, dimer_y_sites_0, k))
-                    temp_two_point_correlation_value_1.append(two_point_correlator(tree_object, dimer_y_sites_1, k))
-                all_two_point_correlation_value_0.append(np.sum(temp_two_point_correlation_value_0))
-                all_two_point_correlation_value_1.append(np.sum(temp_two_point_correlation_value_1))
-
-    return np.mean(all_dimer_dimer_correlation_value)/2, all_dimer_dimer_correlation_value, np.mean(all_two_point_correlation_value_0), np.mean(all_two_point_correlation_value_1)
-
 
 def vector_correlator(tree_object, operators, power):
     """ supplementary function for plaquette AND dimer correlators
@@ -873,8 +819,7 @@ def vector_correlator(tree_object, operators, power):
 
     return operators_total_list
 
-# maybe replace all n-point correlators in code with function below since it does exactly
-# the same (hurr durr)
+
 def n_point_correlator(tree_object, operators, sites):
     """ computes N-point correlation function for tree_objects, using rho_bot_sites
 
@@ -883,14 +828,69 @@ def n_point_correlator(tree_object, operators, sites):
         operators (list): containes torch.cuda tensors or np.ndarrays of shapes
                           (d,d) where d is local hilbert space dimension of a site in the
                           bottem node
-        power (int):
+        sites (list): containing sites (int) to apply operators on
     Returns:
-        operators_total_list (product )
+        correlation_value (float): rho_bot_sites(Args)
     """
     if tree_object.backend == 'torch':
         return rho_bot_sites(tree_object, sites, operators)[0].item()
     elif tree_object.backend == 'numpy':
         return rho_bot_sites(tree_object, sites, operators)[0]
+
+
+def dimer_dimer_correlator(tree_object, operators, direction):
+    reshaped_lattice = tree_object.root.lattice
+    shapes = reshaped_lattice.shape
+    # x direction
+    half_l_x = int(shapes[0]/2)
+    half_l_y = int(shapes[1]/2)
+    all_dimer_dimer_correlation_value = []
+    all_two_point_correlation_value_0 = []
+    all_two_point_correlation_value_1 = []
+    all_operators_list = vector_correlator(tree_object, operators, 2)
+    if (direction == 'x') or (direction == 'X'):
+        for i in range(shapes[0]):
+            for j in range(shapes[1]):
+                dimer_x_sites_0 =  [reshaped_lattice[i,j], reshaped_lattice[i,(j+1)%shapes[1]]]
+                dimer_x_sites_1 =  [reshaped_lattice[i, (j+half_l_x)%shapes[0]], reshaped_lattice[i, (j+half_l_x+1)%shapes[0]]]
+                temp_sites = [*dimer_x_sites_0, *dimer_x_sites_1]
+                temp_dimer_correlation_value = []
+                temp_two_point_correlation_value_0 = []
+                temp_two_point_correlation_value_1 = []
+
+                for k in all_operators_list:
+                    temp_dimer_correlation_value.append(n_point_correlator(tree_object, k, temp_sites))
+                all_dimer_dimer_correlation_value.append(np.sum(temp_dimer_correlation_value))
+
+                for k in operators:
+                    temp_two_point_correlation_value_0.append(n_point_correlator(tree_object, k, dimer_x_sites_0))
+                    temp_two_point_correlation_value_1.append(n_point_correlator(tree_object, k, dimer_x_sites_1))
+
+                all_two_point_correlation_value_0.append(np.sum(temp_two_point_correlation_value_0))
+                all_two_point_correlation_value_1.append(np.sum(temp_two_point_correlation_value_1))
+
+    elif (direction == 'y') or (direction == 'Y'):
+        for i in range(shapes[0]):
+            for j in range(shapes[1]):
+                dimer_y_sites_0 = [reshaped_lattice[i, j] , reshaped_lattice[(i+1)%shapes[0],j]]
+                dimer_y_sites_1 = [reshaped_lattice[(i+half_l_y)%shapes[1],j], reshaped_lattice[(i+1+half_l_y)%shapes[1], j]]
+                temp_sites = [*dimer_y_sites_0, *dimer_y_sites_1]
+                temp_dimer_correlation_value = []
+                temp_two_point_correlation_value_0 = []
+                temp_two_point_correlation_value_1 = []
+
+                for k in all_operators_list:
+                    temp_dimer_correlation_value.append(n_point_correlator(tree_object, k, temp_sites))
+                all_dimer_dimer_correlation_value.append(np.sum(temp_dimer_correlation_value))
+
+                for k in operators:
+                    temp_two_point_correlation_value_0.append(n_point_correlator(tree_object, k, dimer_y_sites_0))
+                    temp_two_point_correlation_value_1.append(n_point_correlator(tree_object, k, dimer_y_sites_1))
+                all_two_point_correlation_value_0.append(np.sum(temp_two_point_correlation_value_0))
+                all_two_point_correlation_value_1.append(np.sum(temp_two_point_correlation_value_1))
+
+    return np.mean(all_dimer_dimer_correlation_value)/2, all_dimer_dimer_correlation_value, np.mean(all_two_point_correlation_value_0), np.mean(all_two_point_correlation_value_1)
+
 
 def plaquette_correlator(tree_object, operators, sites):
     """ single plaquette expectation value """
@@ -904,10 +904,10 @@ def plaquette_correlator(tree_object, operators, sites):
     orders2 = [[alpha, beta], [gamma, delta], [alpha, delta], [beta, gamma], [alpha, gamma], [beta, delta]]
     for operator in all_operators_4:
         for order, sign in zip(orders4, signs4):
-            plaquettes.append(sign*four_point_correlator(tree_object, order, operator))
+            plaquettes.append(sign*n_point_correlator(tree_object, operator, order))
     for operator in all_operators_2:
         for order in orders2:
-            plaquettes.append(.5*two_point_correlator(tree_object, order, operator))
+            plaquettes.append(.5*n_point_correlator(tree_object, operator, order))
     return np.sum(plaquettes)
 
 
@@ -931,16 +931,16 @@ def plaquette_correlators(tree_object, start_operators):
             d = reshaped_lattice[(i+1)%shapes[0], j]
             temp_plaq = plaquette_correlator(tree_object, start_operators, [a, b, g, d]) + .125
             all_plaquettes.append(temp_plaq)
-            # print(np.matrix([[alpha, beta],[delta, gamma]]))
+
     return all_plaquettes
 
 
 def plaquette_plaquette_correlator(tree_object, operators):
     all_operators_8 = vector_correlator(tree_object, operators, 4)
-    # all_operators_6 = vector_correlator(tree_object, operators, 3)
-    #
-    # all_operators_4 = vector_correlator(tree_object, operators, 2)
-    # all_operators_2 = vector_correlator(tree_object, operators, 1)
+    all_operators_6 = vector_correlator(tree_object, operators, 3)
+
+    all_operators_4 = vector_correlator(tree_object, operators, 2)
+    all_operators_2 = vector_correlator(tree_object, operators, 1)
     reshaped_lattice = tree_object.root.lattice
     shapes = reshaped_lattice.shape
     # x direction
@@ -952,7 +952,7 @@ def plaquette_plaquette_correlator(tree_object, operators):
     for i in range(1,shapes[0]):
         for j in range(shapes[1]):
             print('working on %s-%s'%(i,j))
-            x_temp_plaquette, y_temp_plaquette = 0, 0
+            x_temp_plaquette, y_temp_plaquette = [], []
             i_0 = reshaped_lattice[i, j]
             j_0 = reshaped_lattice[i, (j+1)%shapes[1]]
             k_0 = reshaped_lattice[(i+1)%shapes[0], (j+1)%shapes[1]]
@@ -1017,113 +1017,38 @@ def plaquette_plaquette_correlator(tree_object, operators):
             factors_2 = [.5,.5,.5,.5,.5,.5,.5,.5,.5,.5,.5,.5]
 
             for k in all_operators_8:
-                print(torch.cuda.memory_allocated())
                 for index_8_x, index_8_y, factor_8 in zip(indices_8_x, indices_8_y, factors_8):
-                    print(torch.cuda.memory_allocated()*(10**(-9)))
-                    # for obj in gc.get_objects():
-                    #     try:
-                    #         if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-                    #             print(type(obj), obj.size())
-                    #     except:
-                    #         pass
-                    x_temp_plaquette += factor_8*eight_point_correlator(tree_object, index_8_x, k)
+                    x_temp_plaquette.append(factor_8*n_point_correlator(tree_object, k, index_8_x))
+                    y_temp_plaquette.append(factor_8*n_point_correlator(tree_object, k, index_8_y))
                     torch.cuda.empty_cache()
-                    print('working on', index_8_x)
+            for k in all_operators_6:
+                for index_6_x, index_6_y, factor_6 in zip(indices_6_x, indices_6_y, factors_6):
+                    x_temp_plaquette.append(factor_6*n_point_correlator(tree_object, k, index_6_x))
+                    y_temp_plaquette.append(factor_6*n_point_correlator(tree_object, k, index_6_y))
                 torch.cuda.empty_cache()
-                    # y_temp_plaquette.append(factor_8*eight_point_correlator(tree_object, index_8_y, k))
-                    # torch.cuda.empty_cache()
-            # for k in all_operators_6:
-            #     for index_6_x, index_6_y, factor_6 in zip(indices_6_x, indices_6_y, factors_6):
-            #         x_temp_plaquette.append(factor_6*six_point_correlator(tree_object, index_6_x, k))
-            #         # y_temp_plaquette.append(factor_6*six_point_correlator(tree_object, index_6_y, k))
-            #         torch.cuda.empty_cache()
-            # for k in all_operators_4:
-            #     for index_4_x, index_4_y, factor_4 in zip(indices_4_x, indices_4_y, factors_4):
-            #         x_temp_plaquette.append(factor_4*four_point_correlator(tree_object, index_4_x, k))
-            #         # y_temp_plaquette.append(factor_4*four_point_correlator(tree_object, index_4_y, k))
-            #         torch.cuda.empty_cache()
-            # for k in all_operators_2:
-            #     for index_2_x, index_2_y, factor_2 in zip(indices_2_x, indices_2_y, factors_2):
-            #         x_temp_plaquette.append(factor_2*two_point_correlator(tree_object, index_2_x, k))
-            #         # y_temp_plaquette.append(factor_2*two_point_correlator(tree_object, index_2_y, k))
-            #         torch.cuda.empty_cache()
+            for k in all_operators_4:
+                for index_4_x, index_4_y, factor_4 in zip(indices_4_x, indices_4_y, factors_4):
+                    x_temp_plaquette.append(factor_4*n_point_correlator(tree_object, k, index_4_x))
+                    y_temp_plaquette.append(factor_4*n_point_correlator(tree_object, k, index_4_y))
+                    torch.cuda.empty_cache()
+            for k in all_operators_2:
+                for index_2_x, index_2_y, factor_2 in zip(indices_2_x, indices_2_y, factors_2):
+                    x_temp_plaquette.append(factor_2*n_point_correlator(tree_object, k, index_2_x))
+                    y_temp_plaquette.append(factor_2*n_point_correlator(tree_object, k, index_2_y))
+                    torch.cuda.empty_cache()
 
-            x_plaquettes.append(x_temp_plaquette)
-            # y_plaquettes.append(np.sum(y_temp_plaquette))
+            x_plaquettes.append(np.sum(x_temp_plaquette))
+            y_plaquettes.append(np.sum(y_temp_plaquette))
             torch.cuda.empty_cache()
         torch.cuda.empty_cache()
     x_plaquettes.append(.125**2)
-    # y_plaquettes.append(.125**2)
+    y_plaquettes.append(.125**2)
     mean_squared_plaquette = np.mean(plaquette_correlators(tree_object, operators))**2
 
-    # commented out y_plaquettes  np.mean(y_plaquettes), y_plaquettes,
-    return np.mean(x_plaquettes), x_plaquettes, mean_squared_plaquette
+    # commented out y_plaquettes
+    return np.mean(x_plaquettes), np.mean(y_plaquettes), y_plaquettes, x_plaquettes, mean_squared_plaquette
 
-# TODO: remove correlators below and replace all instances by n_point_correlator
-# in the rest of the file
-def eight_point_correlator(tree_object, sites, operators):
-    """ Docstring for two_point_correlator """
-    if tree_object.backend == 'torch':
-        # torch.cuda.ipc_collect()
-        # bla = oe.contract(rho_bot_sites(tree_object, sites)[0], [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], operators[0], [1,9],
-        #                                 operators[1], [2,10], operators[2], [3,11], operators[3], [4,12], operators[4],
-        #                                 [5,13], operators[5], [6,14], operators[6], [7,15], operators[7], [8,16]).item()
-        # print(torch.cuda.memory_allocated()*(10**(-9)))
-        return rho_bot_sites(tree_object, sites, operators)[0].item()
-        # return bla
-    elif tree_object.backend == 'numpy':
-        return oe.contract(rho_bot_sites(tree_object, sites)[0], [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16], operators[0], [1,9],
-                                        operators[1], [2,10], operators[2], [3,11], operators[3], [4,12], operators[4],
-                                        [5,13], operators[5], [6,14], operators[6], [7,15], operators[7], [8,16])
-
-
-def six_point_correlator(tree_object, sites, operators):
-    """ Docstring for two_point_correlator """
-    if tree_object.backend == 'torch':
-        return rho_bot_sites(tree_object, sites, operators)[0].item()
-
-    elif tree_object.backend == 'numpy':
-        return rho_bot_sites(tree_object, sites, operators)[0]
-
-    return correlation_value
-
-
-def four_point_correlator(tree_object, sites, operators):
-    """ Docstring for two_point_correlator """
-
-    if tree_object.backend == 'torch':
-        return rho_bot_sites(tree_object, sites, operators)[0].item()
-
-    elif tree_object.backend == 'numpy':
-        return oe.contract(to_contract, [1,2,3,4,5,6,7,8], operators[0], [1,5],
-                                        operators[1], [2,6], operators[2], [3,7], operators[3], [4,8])
-
-    return correlation_value
-
-
-def two_point_correlator(tree_object, sites, operators):
-    """ Docstring for two_point_correlator """
-    if tree_object.backend == 'torch':
-        return rho_bot_sites(tree_object, sites, operators)[0].item()
-
-    elif tree_object.backend == 'numpy':
-        correlation_value = oe.contract(to_contract, [1,2,3,4], operators[0], [1,3],
-                                        operators[1], [2,4])
-
-    return correlation_value
-
-
-def one_point_correlator(tree_object, site, operator):
-    """ Docstring for one_point_correlator """
-    to_contract = rho_bot_sites(tree_object, site)[0]
-    if tree_object.backend == 'torch':
-        correlation_value = oe.contract(to_contract, [1,2], operator, [1,2]).item()
-    elif tree_object.backend == 'numpy':
-        correlation_value = oe.contract(to_contract, [1,2], operator, [1,2])
-    return correlation_value
-
-
-
+# under construction
 def mean_two_point_correlator_i_ir(tree_object, operators, correct_magnetization):
 
     square_size = np.sqrt(tree_object.root.lattice.flatten().size).astype(int)
@@ -1146,8 +1071,8 @@ def mean_two_point_correlator_i_ir(tree_object, operators, correct_magnetization
         for x in range(square_size+1):
             for y in range(square_size+1):
                 if middle_point != sub_lattice[x,y]:
-                    temp_correlation[x,y] = two_point_correlator(tree_object,
-                        [middle_point, sub_lattice[x,y]], operators)
+                    temp_correlation[x,y] = n_point_correlator(tree_object,operators,
+                        [middle_point, sub_lattice[x,y]])
                 else:
                     temp_correlation[x,y]= 1.0 # correlation with itself is by def 1
 
@@ -1157,8 +1082,8 @@ def mean_two_point_correlator_i_ir(tree_object, operators, correct_magnetization
     magnetizations = []
 
     for x, y in list(it.combinations(lattice.flatten(),2)):
-        magnetizations.append(one_point_correlator(tree_object, [x], operators[0])*
-                              one_point_correlator(tree_object, [y], operators[0]))
+        magnetizations.append(n_point_correlator(tree_object, [operators[0]], [x])*
+                              n_point_correlator(tree_object, [operators[0]], [y]))
 
     mean_magnetization = np.mean(magnetizations)
     if correct_magnetization:
@@ -1210,3 +1135,56 @@ def optimize_network(tree_object, probe_length, var_error, max_iterations, print
 
     print('converged up to variance of:%s at iteration %s'%(variance_error, counter))
     return
+
+
+
+# dump:
+
+# def eight_point_correlator(tree_object, sites, operators):
+#     """ Docstring for two_point_correlator """
+#     if tree_object.backend == 'torch':
+#         return rho_bot_sites(tree_object, sites, operators)[0].item()
+#         # return bla
+#     elif tree_object.backend == 'numpy':
+#         return rho_bot_sites(tree_object, sites, operators)[0]
+#
+#
+# def six_point_correlator(tree_object, sites, operators):
+#     """ Docstring for two_point_correlator """
+#     if tree_object.backend == 'torch':
+#         return rho_bot_sites(tree_object, sites, operators)[0].item()
+#
+#     elif tree_object.backend == 'numpy':
+#         return rho_bot_sites(tree_object, sites, operators)[0]
+#
+#     return correlation_value
+#
+#
+# def four_point_correlator(tree_object, sites, operators):
+#     """ Docstring for two_point_correlator """
+#
+#     if tree_object.backend == 'torch':
+#         return rho_bot_sites(tree_object, sites, operators)[0].item()
+#
+#     elif tree_object.backend == 'numpy':
+#         return rho_bot_sites(tree_object, sites, operators)[0]
+#
+#     return correlation_value
+#
+#
+# def two_point_correlator(tree_object, sites, operators):
+#     """ Docstring for two_point_correlator """
+#     if tree_object.backend == 'torch':
+#         return rho_bot_sites(tree_object, sites, operators)[0].item()
+#
+#     elif tree_object.backend == 'numpy':
+#         return rho_bot_sites(tree_object, sites, operators)[0]
+#
+#
+# def one_point_correlator(tree_object, site, operator):
+#     """ Docstring for one_point_correlator """
+#     if tree_object.backend == 'torch':
+#         return rho_bot_sites(tree_object, site, operators)[0].item()
+#
+#     elif tree_object.backend == 'numpy':
+#         return rho_bot_sites(tree_object, site, operators)[0]
