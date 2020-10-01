@@ -89,6 +89,8 @@ class TreeTensorNetwork:
         self.ttype = ttype
         self.cut = cut
         self.tree_seed = tree_seed
+        if self.tree_seed is not None:
+            torch.manual_seed(self.tree_seed)
         self.node_list = []
         self.times = []
         self.energy_per_sweep_list = []
